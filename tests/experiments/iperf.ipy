@@ -1,0 +1,17 @@
+#!/usr/bin/env ipython
+
+import mpf
+
+mpf.add_variable('parallel', range(1,9))
+mpf.add_variable('zerocopy', {'': 'disabled', '-Z': 'enabled'})
+
+@mpf.run(role='server')
+def start_server(parallel, zerocopy):
+    !iperf3 -s -1 > /dev/null &
+
+@mpf.run(role='client', delay=1)
+def start_client(parallel, zerocopy):
+    result = !iperf3 -f k -t 2 -P $parallel $zerocopy -c {mpf.get_ip_address('server', 0)} | tail -n 3 | grep -ioE "[0-9.]+ [kmg]bits"
+    yield 'goodput', *result
+
+mpf.start_experiment()
