@@ -1,3 +1,5 @@
+import inspect
+
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 from time import sleep
@@ -70,6 +72,7 @@ def start_experiment():
         for role in roles:
             for delay, function in roles[role].functions:
                 sleep(delay)
-                ret = function(**experiment_values)
+                function_args = inspect.getargspec(function).args
+                ret = function(**{arg_name: experiment_values[arg_name] for arg_name in function_args})
                 if ret:
                     print(experiment_values, list(ret))
