@@ -8,6 +8,7 @@ from time import sleep
 variables: Dict[str, 'Variable'] = {}
 roles: Dict[str, 'Role'] = {}
 
+
 @dataclass
 class Variable():
     """ A variable to explore in an experiment.
@@ -40,11 +41,14 @@ class Variable():
                 else:
                     yield {variable.name: value}
 
+
 @dataclass
 class Role():
     """ A role defining what code to run and when to run it. """
     name: str
-    functions: List[Tuple[int, Any]]  # A list of tuple of delay value and IPython function to execute
+    # A list of tuple of delay value and IPython function to execute
+    functions: List[Tuple[int, Any]]
+
 
 def add_variable(name: str, values):
     """ Adds the given variable and values to explore in the experiment. """
@@ -53,18 +57,22 @@ def add_variable(name: str, values):
         values = list(values)
     variables[name] = Variable(name, values)
 
-def run(role: str='main', delay: int=0):
+
+def run(role: str = 'main', delay: int = 0):
     """ Registers the given function to be executed by a role at given time. """
     r = roles.get(role) or Role(role, [])
+
     def inner(func):
         r.functions.append((delay, func))
         roles[role] = r
         return func
     return inner
 
-def get_ip_address(role: str, interface: int=0) -> str:
+
+def get_ip_address(role: str, interface: int = 0) -> str:
     """ Returns the IP address of the given interface for the given role. """
     return "::1"
+
 
 def start_experiment():
     """ Runs the experiment. """
@@ -73,6 +81,7 @@ def start_experiment():
             for delay, function in roles[role].functions:
                 sleep(delay)
                 function_args = inspect.getargspec(function).args
-                ret = function(**{arg_name: experiment_values[arg_name] for arg_name in function_args})
+                ret = function(
+                    **{arg_name: experiment_values[arg_name] for arg_name in function_args})
                 if ret:
                     print(experiment_values, list(ret))
