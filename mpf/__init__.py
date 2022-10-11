@@ -1,4 +1,5 @@
 import inspect
+import csv
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
@@ -76,6 +77,7 @@ def get_ip_address(role: str, interface: int = 0) -> str:
 
 def start_experiment():
     """ Runs the experiment. """
+    all_experiment_results = list()
     for experiment_values in Variable.explore(list(variables.values())):
         for role in roles:
             for delay, function in roles[role].functions:
@@ -84,4 +86,14 @@ def start_experiment():
                 ret = function(
                     **{arg_name: experiment_values[arg_name] for arg_name in function_args})
                 if ret:
-                    print(experiment_values, list(ret))
+                    experiment_results = experiment_values.copy()
+                    for name, val in list(ret):
+                        experiment_results[f"result-{name}"] = val
+                    print(experiment_results)
+                    all_experiment_results.append(experiment_results)
+    
+    # Save output.
+    with open("results.csv", "w+") as fd:
+        csv_writer = csv.DictWriter(fd, all_experiment_results[0].keys())
+        csv_writer.writeheader()
+        csv_writer.writerows(all_experiment_results)
