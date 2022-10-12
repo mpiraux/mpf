@@ -62,6 +62,7 @@ class Role():
 def create_profile(profile_dir: str, cluster_file: FileIO):
     """ Populates the given directory with a blank IPython profile structure, enables SSH 
         and sets up the IPython engines based on the given YAML cluster file.
+        Creates the roles available from the cluster.
         Returns the [user]@hostname value to use to reach the controller.
     """
     cluster = yaml.safe_load(cluster_file)
@@ -132,7 +133,7 @@ def run_experiment():
     subprocess.run(['ipcluster', 'stop', f'--profile-dir={cluster_profile}'])
 
 parser = argparse.ArgumentParser(description='mpf experiment')
-parser.add_argument('--cluster', '-c', metavar='cluster.yaml', type=argparse.FileType('r'), help='The YAML file describing the cluster')
+parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True,help='The YAML file describing the cluster')
 args = parser.parse_args()
 
 if args.cluster:
