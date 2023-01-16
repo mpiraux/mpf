@@ -128,18 +128,23 @@ def run_experiment():
                     client[role_id].apply(function, **call_args)
                 else:
                     print(client[role_id].apply_sync(function, **call_args))
-        cluster.signal_engines_sync(signal.SIGINT)
         client.abort()
-    subprocess.run(['ipcluster', 'stop', f'--profile-dir={cluster_profile}'])
+
+def start_cluster_and_connect_client(cluster_file: FileIO):
+    cluster_profile = f"profile_{os.path.basename(cluster_file.name)}"
+    controller_node = create_profile(cluster_profile, cluster_file)
+    try:
+        cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
+    except FileNotFoundError:
+        subprocess.run(['ipcluster', 'start', f'--profile-dir={cluster_profile}', '--daemonize=True'])
+        cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
+    return cluster.connect_client_sync(sshserver=controller_node)
+
 
 parser = argparse.ArgumentParser(description='mpf experiment')
 parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True,help='The YAML file describing the cluster')
 args = parser.parse_args()
 
 if args.cluster:
-    cluster_profile = f"profile_{os.path.basename(args.cluster.name)}"
-    controller_node = create_profile(cluster_profile, args.cluster)
-    subprocess.run(['ipcluster', 'start', f'--profile-dir={cluster_profile}', '--daemonize=True'])
-    cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
-    client = cluster.connect_client_sync(sshserver=controller_node)
-    client.wait_for_engines()
+    client = start_cluster_and_connect_client(args.cluster)
+    client.wait_for_engines(timeout=10)
