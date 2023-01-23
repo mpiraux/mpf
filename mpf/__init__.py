@@ -5,8 +5,8 @@ import yaml
 import subprocess
 import argparse
 import shutil
-import signal
 import ipyparallel as ipp
+import pandas as pd
 
 
 from dataclasses import dataclass
@@ -59,21 +59,17 @@ class Role():
     functions: List[Tuple[int, bool, Any]]  # A list of tuple of delay value, daemonize and IPython function to execute
     interfaces: List[Tuple[str, str]]  # A list of tuple interface name, ip address
 
-def create_profile(profile_dir: str, cluster_file: FileIO):
+def create_profile(profile_dir: str, cluster: dict):
     """ Populates the given directory with a blank IPython profile structure, enables SSH 
         and sets up the IPython engines based on the given YAML cluster file.
-        Creates the roles available from the cluster.
-        Returns the [user]@hostname value to use to reach the controller.
+        Creates the roles available from the cluster definition.
     """
-    cluster = yaml.safe_load(cluster_file)
     engines = {}
     for machine_spec in cluster['machines']:
         engine = machine_spec['hostname']
         if 'user' in machine_spec:
             engine = f"{machine_spec['user']}@{engine}"
         engines[engine] = 1  # Starts one engine per host
-        assert machine_spec['role'] not in roles, f"role {machine_spec['role']} already exists"
-        roles[machine_spec['role']] = Role(machine_spec['role'], [], machine_spec['interfaces'])
 
     # The controller is the ipyparallel controller listening for external connections
     controller_node = cluster['controller']['hostname']
@@ -118,8 +114,11 @@ def run(role: str='main', delay: int=0, daemon=False):
     return inner
 
 def run_experiment():
-    """ Runs the experiment and stops the cluster. """
+    """ Runs the experiment and returns the results gathered. """
+    results = []
+    variable_values = []
     for experiment_values in Variable.explore(list(variables.values())):
+        row = {}
         for role_id, role in enumerate(roles):
             for delay, daemon, function in roles[role].functions:
                 sleep(delay)
@@ -131,19 +130,29 @@ def run_experiment():
                 if daemon:
                     client[role_id].apply(function, **call_args)
                 else:
-                    print(client[role_id].apply_sync(function, **call_args))
+                    result = client[role_id].apply_sync(function, **call_args)
+                    assert all(k not in row for k in result.keys()), f"function {function} returned a result value that conflicts with experiment value"
+                    row.update(result)
+        results.append(row)
+        variable_values.append(tuple(experiment_values.values()))
         client.abort()
+    index = pd.MultiIndex.from_tuples(variable_values, names=[v.name for v in variables.values()])
+    return pd.DataFrame(results, index=index)
 
 def start_cluster_and_connect_client(cluster_file: FileIO):
     cluster_profile = f"profile_{os.path.basename(cluster_file.name)}"
-    controller_node = create_profile(cluster_profile, cluster_file)
+    cluster_definition = yaml.safe_load(cluster_file)
+    for machine_spec in cluster_definition['machines']:
+        assert machine_spec['role'] not in roles, f"role {machine_spec['role']} already exists"
+        roles[machine_spec['role']] = Role(machine_spec['role'], [], machine_spec['interfaces'])
+    controller_node = cluster_definition['machines'][0]['hostname']
     try:
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
     except FileNotFoundError:
-        subprocess.run(['ipcluster', 'start', f'--profile-dir={cluster_profile}', '--daemonize=True'])
+        create_profile(cluster_profile, cluster_definition)
+        subprocess.run(['ipcluster', 'start', f'--profile-dir={cluster_profile}', '--daemonize=True', '--log-level=ERROR'])
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
     return cluster.connect_client_sync(sshserver=controller_node)
-
 
 parser = argparse.ArgumentParser(description='mpf experiment')
 parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True,help='The YAML file describing the cluster')
@@ -151,4 +160,4 @@ args = parser.parse_args()
 
 if args.cluster:
     client = start_cluster_and_connect_client(args.cluster)
-    client.wait_for_engines(timeout=10)
+    client.wait_for_engines(timeout=10, block=True)
