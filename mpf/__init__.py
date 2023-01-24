@@ -75,9 +75,9 @@ def create_profile(profile_dir: str, cluster_file: FileIO):
         assert machine_spec['role'] not in roles, f"role {machine_spec['role']} already exists"
         roles[machine_spec['role']] = Role(machine_spec['role'], [], machine_spec['interfaces'])
 
-    # The first machine is also the IPython controller
-    controller_node = cluster['machines'][0]['hostname']
-    controller_ip = cluster['machines'][0]['interfaces'][0]['ip']
+    # The controller is the ipyparallel controller listening for external connections
+    controller_node = cluster['controller']['hostname']
+    controller_ip = cluster['controller']['interfaces'][0]['ip']
 
     shutil.rmtree(profile_dir, ignore_errors=True)
     p = subprocess.run(['ipython', 'profile', 'create', '--parallel', f'--profile-dir={profile_dir}'])

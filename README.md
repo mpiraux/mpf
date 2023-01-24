@@ -38,7 +38,7 @@ This function specifies three parameters. The `mpf_ctx` object describes the con
 The script can be executed directly and receive a cluster YAML file defining the machines that will run the experiment.
 
 ```
-$ tests/experiments/iperf.py -c tests/experiments/cluster.yaml
+$ tests/experiments/iperf.ipy -c tests/experiments/cluster.yaml
 ```
 
 ## Requirements

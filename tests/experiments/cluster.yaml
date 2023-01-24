@@ -3,9 +3,11 @@ global:
   python_path: /path/to/python # The path to the Python interpreter to use on the machines
 machines: # A list of hostname, role, (optional) user and interfaces keys defining the hosts 
           # in the cluster and their roles.
-  - hostname: localhost
+  - &controller_def
+    hostname: localhost
     user: root
     role: main
     interfaces:
       - name: lo
         ip: 127.0.0.1
+controller: *controller_def
