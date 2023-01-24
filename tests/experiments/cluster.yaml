@@ -10,4 +10,6 @@ machines: # A list of hostname, role, (optional) user and interfaces keys defini
     interfaces:
       - name: lo
         ip: 127.0.0.1
-controller: *controller_def
+controller:
+  <<: *controller_def
+  ports: '65400-65432'

@@ -78,6 +78,7 @@ def create_profile(profile_dir: str, cluster_file: FileIO):
     # The controller is the ipyparallel controller listening for external connections
     controller_node = cluster['controller']['hostname']
     controller_ip = cluster['controller']['interfaces'][0]['ip']
+    controller_ports = cluster['controller']['ports']
 
     shutil.rmtree(profile_dir, ignore_errors=True)
     p = subprocess.run(['ipython', 'profile', 'create', '--parallel', f'--profile-dir={profile_dir}'])
@@ -93,6 +94,9 @@ c.SSHControllerLauncher.location = '{controller_node}'
 c.SSHControllerLauncher.controller_cmd = ['{python_path}', '-m', 'ipyparallel.controller', '--ip={controller_ip}']
 c.SSHLauncher.remote_python = '{python_path}'"""
     .format(engines=repr(engines), controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path']))
+
+    with open(os.path.join(profile_dir, 'ipcontroller_config.py'), 'a') as config:
+        config.write("c.IPController.ports = {}".format(repr(controller_ports)))
     return controller_node
 
 def add_variable(name: str, values):
