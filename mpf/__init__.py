@@ -131,7 +131,8 @@ def run_experiment():
                     client[role_id].apply(function, **call_args)
                 else:
                     result = client[role_id].apply_sync(function, **call_args)
-                    assert all(k not in row for k in result.keys()), f"function {function} returned a result value that conflicts with experiment value"
+                    assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values"
+                    assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
                     row.update(result)
         results.append(row)
         variable_values.append(tuple(experiment_values.values()))
