@@ -43,4 +43,4 @@ $ tests/experiments/iperf.py -c tests/experiments/cluster.yaml
 
 ## Requirements
 
-Running experiments with mpf requires reasonably coherent Python and packages versions between the executor and the remote nodes.
+Running experiments with mpf requires reasonably coherent Python and packages versions between the executor and the remote nodes. `ipyparallel` should be installed on the remote nodes.
