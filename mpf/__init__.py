@@ -124,7 +124,7 @@ def run_experiment():
             for delay, daemon, function in roles[role].functions:
                 sleep(delay)
                 mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}}
-                function_args = inspect.getargspec(function).args
+                function_args = inspect.getfullargspec(function).args
                 call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
                 if 'mpf_ctx' in function_args:
                     call_args['mpf_ctx'] = mpf_ctx
