@@ -7,6 +7,7 @@ import argparse
 import shutil
 import ipyparallel as ipp
 import pandas as pd
+import random
 from tqdm.auto import tqdm
 
 
@@ -15,6 +16,7 @@ from typing import Any, Dict, List, Tuple, Callable
 from time import sleep
 
 RESERVED_VARIABLES = {'mpf_ctx'}
+random.seed('mpf')
 
 variables: Dict[str, 'Variable'] = {}
 functions: List[Tuple[str, int, Callable]] = []
@@ -118,11 +120,13 @@ def run(role: str='main', delay: int=0):
         return func
     return inner
 
-def run_experiment():
+def run_experiment(n_runs=3):
     """ Runs the experiment and returns the results gathered. """
     results = []
     variable_values = []
-    for experiment_values in tqdm(list(Variable.explore(list(variables.values())))):
+    experiments = list(Variable.explore(list(variables.values()))) * n_runs
+    random.shuffle(experiments)
+    for experiment_values in tqdm(experiments):
         row = {}
         for role, delay, function in functions:
             role_id = list(roles).index(role)
@@ -133,7 +137,6 @@ def run_experiment():
             if 'mpf_ctx' in function_args:
                 call_args['mpf_ctx'] = mpf_ctx
             client[role_id].push(experiment_globals)
-            print(role, function)
             result = client[role_id].apply_sync(function, **call_args)
             if result is None:
                 result = {}
