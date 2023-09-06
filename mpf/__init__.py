@@ -18,6 +18,7 @@ RESERVED_VARIABLES = {'mpf_ctx'}
 
 variables: Dict[str, 'Variable'] = {}
 roles: Dict[str, 'Role'] = {}
+experiment_globals: Dict[str, Any] = {}
 
 @dataclass
 class Variable():
@@ -104,6 +105,10 @@ def add_variable(name: str, values):
         values = list(values)
     variables[name] = Variable(name, values)
 
+def register_globals(**kwargs):
+    """ Updates the experiment global variables with the given names and values. """
+    experiment_globals.update(kwargs)
+
 def run(role: str='main', delay: int=0):
     """ Registers the given function to be executed by a role at given time. """
     assert role in roles, f"role {role} is not defined in the cluster"
@@ -128,6 +133,7 @@ def run_experiment():
                 call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
                 if 'mpf_ctx' in function_args:
                     call_args['mpf_ctx'] = mpf_ctx
+                client[role_id].push(experiment_globals)
                 result = client[role_id].apply_sync(function, **call_args)
                 if result is None:
                     result = {}
