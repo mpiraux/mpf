@@ -161,4 +161,4 @@ args = parser.parse_args()
 
 if args.cluster:
     client = start_cluster_and_connect_client(args.cluster)
-    client.wait_for_engines(timeout=10, block=True)
+    client.wait_for_engines(timeout=30, block=True)
