@@ -11,12 +11,13 @@ from tqdm.auto import tqdm
 
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Callable
 from time import sleep
 
 RESERVED_VARIABLES = {'mpf_ctx'}
 
 variables: Dict[str, 'Variable'] = {}
+functions: List[Tuple[str, int, Callable]] = []
 roles: Dict[str, 'Role'] = {}
 experiment_globals: Dict[str, Any] = {}
 
@@ -112,10 +113,8 @@ def register_globals(**kwargs):
 def run(role: str='main', delay: int=0):
     """ Registers the given function to be executed by a role at given time. """
     assert role in roles, f"role {role} is not defined in the cluster"
-    r = roles[role]
     def inner(func):
-        r.functions.append((delay, func))
-        roles[role] = r
+        functions.append((role, delay, func))
         return func
     return inner
 
@@ -125,21 +124,22 @@ def run_experiment():
     variable_values = []
     for experiment_values in tqdm(list(Variable.explore(list(variables.values())))):
         row = {}
-        for role_id, role in enumerate(roles):
-            for delay, function in roles[role].functions:
-                sleep(delay)
-                mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}}
-                function_args = inspect.getfullargspec(function).args
-                call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
-                if 'mpf_ctx' in function_args:
-                    call_args['mpf_ctx'] = mpf_ctx
-                client[role_id].push(experiment_globals)
-                result = client[role_id].apply_sync(function, **call_args)
-                if result is None:
-                    result = {}
-                assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
-                assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
-                row.update(result)
+        for role, delay, function in functions:
+            role_id = list(roles).index(role)
+            sleep(delay)
+            mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}}
+            function_args = inspect.getfullargspec(function).args
+            call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
+            if 'mpf_ctx' in function_args:
+                call_args['mpf_ctx'] = mpf_ctx
+            client[role_id].push(experiment_globals)
+            print(role, function)
+            result = client[role_id].apply_sync(function, **call_args)
+            if result is None:
+                result = {}
+            assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
+            assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
+            row.update(result)
         results.append(row)
         variable_values.append(tuple(experiment_values.values()))
         client.abort()
