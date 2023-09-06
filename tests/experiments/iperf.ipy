@@ -4,9 +4,9 @@ import mpf
 mpf.add_variable('parallel', range(1,9))
 mpf.add_variable('zerocopy', {'': 'disabled', '-Z': 'enabled'})
 
-@mpf.run(role='server', daemon=True)
+@mpf.run(role='server')
 def start_server():
-    !iperf3 -s -1 > /dev/null
+    !iperf3 -D -s -1 > /dev/null
 
 @mpf.run(role='client', delay=1)
 def start_client(mpf_ctx, parallel, zerocopy):

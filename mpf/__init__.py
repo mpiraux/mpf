@@ -57,7 +57,7 @@ class Role():
         and the network interfaces of the underlying machine
     """
     name: str
-    functions: List[Tuple[int, bool, Any]]  # A list of tuple of delay value, daemonize and IPython function to execute
+    functions: List[Tuple[int, Any]]  # A list of tuple of delay value and IPython function to execute
     interfaces: List[Tuple[str, str]]  # A list of tuple interface name, ip address
 
 def create_profile(profile_dir: str, cluster: dict):
@@ -104,12 +104,12 @@ def add_variable(name: str, values):
         values = list(values)
     variables[name] = Variable(name, values)
 
-def run(role: str='main', delay: int=0, daemon=False):
+def run(role: str='main', delay: int=0):
     """ Registers the given function to be executed by a role at given time. """
     assert role in roles, f"role {role} is not defined in the cluster"
     r = roles[role]
     def inner(func):
-        r.functions.append((delay, daemon, func))
+        r.functions.append((delay, func))
         roles[role] = r
         return func
     return inner
@@ -121,22 +121,19 @@ def run_experiment():
     for experiment_values in tqdm(list(Variable.explore(list(variables.values())))):
         row = {}
         for role_id, role in enumerate(roles):
-            for delay, daemon, function in roles[role].functions:
+            for delay, function in roles[role].functions:
                 sleep(delay)
                 mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}}
                 function_args = inspect.getfullargspec(function).args
                 call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
                 if 'mpf_ctx' in function_args:
                     call_args['mpf_ctx'] = mpf_ctx
-                if daemon:
-                    client[role_id].apply(function, **call_args)
-                else:
-                    result = client[role_id].apply_sync(function, **call_args)
-                    if result is None:
-                        result = {}
-                    assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
-                    assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
-                    row.update(result)
+                result = client[role_id].apply_sync(function, **call_args)
+                if result is None:
+                    result = {}
+                assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
+                assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
+                row.update(result)
         results.append(row)
         variable_values.append(tuple(experiment_values.values()))
         client.abort()
