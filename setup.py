@@ -13,6 +13,7 @@ setup(
     install_requires=[
         'ipyparallel >= 8.6', 
         'pandas >= 1.5',
-        'PyYAML >= 6.0'
+        'PyYAML >= 6.0',
+        'tqdm'
         ],
 )

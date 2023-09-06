@@ -7,6 +7,7 @@ import argparse
 import shutil
 import ipyparallel as ipp
 import pandas as pd
+from tqdm.auto import tqdm
 
 
 from dataclasses import dataclass
@@ -117,7 +118,7 @@ def run_experiment():
     """ Runs the experiment and returns the results gathered. """
     results = []
     variable_values = []
-    for experiment_values in Variable.explore(list(variables.values())):
+    for experiment_values in tqdm(list(Variable.explore(list(variables.values())))):
         row = {}
         for role_id, role in enumerate(roles):
             for delay, daemon, function in roles[role].functions:
