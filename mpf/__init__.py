@@ -74,7 +74,7 @@ def create_profile(profile_dir: str, cluster: dict):
 
     # The controller is the ipyparallel controller listening for external connections
     controller_node = cluster['controller']['hostname']
-    controller_ip = cluster['controller']['interfaces'][0]['ip']
+    controller_ip = cluster['controller']['control_ip']
     controller_ports = cluster['controller']['ports']
 
     shutil.rmtree(profile_dir, ignore_errors=True)

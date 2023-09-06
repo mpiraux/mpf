@@ -13,3 +13,5 @@ machines: # A list of hostname, role, (optional) user and interfaces keys defini
 controller:
   <<: *controller_def
   ports: '65400-65432'
+  control_ip: ::1  # Enables to set another IP to reach the controller, for instance through a separate
+           # control network.
