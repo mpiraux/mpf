@@ -140,7 +140,7 @@ def run_experiment(n_runs=3):
             role_id = list(roles).index(role)
             client[role_id].push({f.__name__: f for f in helpers}, block=True)
             sleep(delay)
-            mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}}
+            mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}, 'role': role}
             function_args = inspect.getfullargspec(function).args
             call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
             if 'mpf_ctx' in function_args:
