@@ -8,12 +8,21 @@ import shutil
 import ipyparallel as ipp
 import pandas as pd
 import random
+import logging
 from tqdm.auto import tqdm
 
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Callable
 from time import sleep
+
+run_logger = logging.getLogger('run')
+run_logger.setLevel(logging.WARNING)
+sh = logging.StreamHandler()
+sh.setLevel(logging.INFO)
+sh.setFormatter(logging.Formatter('%(asctime)s [%(role)s] %(function)s: %(message)s'))
+if not run_logger.hasHandlers():
+    run_logger.addHandler(sh)
 
 RESERVED_VARIABLES = {'mpf_ctx'}
 random.seed('mpf')
@@ -99,6 +108,24 @@ c.SSHLauncher.remote_python = '{python_path}'"""
 
     with open(os.path.join(profile_dir, 'ipcontroller_config.py'), 'a') as config:
         config.write("c.IPController.ports = {}".format(repr(controller_ports)))
+
+    with open(os.path.join(profile_dir, 'startup', '00-mpf_exec.ipy'), 'w') as mpf_exec_file:
+        mpf_exec_file.write("""
+from IPython.core.magic import register_line_magic
+def ex(*args):
+    global mpf_log
+    line = ' '.join(args)
+    out = !$line
+    mpf_log.append((line, out))
+    return out
+register_line_magic(ex)
+del ex
+        """.format(python_path=cluster['global']['python_path']))
+
+    for e in engines:
+        p = subprocess.run(['rsync', '--mkpath', os.path.join(profile_dir, 'startup', '00-mpf_exec.ipy'), f'{e}:/tmp/mpf-ipy-profile/startup/00-mpf_exec.ipy'])
+        assert p.returncode == 0
+
     return controller_node
 
 def add_variable(name: str, values):
@@ -128,8 +155,10 @@ def helper():
         return func
     return inner
 
-def run_experiment(n_runs=3):
+def run_experiment(n_runs=3, log_ex=False):
     """ Runs the experiment and returns the results gathered. """
+    if log_ex:
+        run_logger.setLevel(logging.INFO)
     results = []
     variable_values = []
     experiments = list(Variable.explore(list(variables.values()))) * n_runs
@@ -138,7 +167,7 @@ def run_experiment(n_runs=3):
         row = {}
         for role, delay, function in functions:
             role_id = list(roles).index(role)
-            client[role_id].push({f.__name__: f for f in helpers}, block=True)
+            client[role_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}), block=True)
             sleep(delay)
             mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}, 'role': role}
             function_args = inspect.getfullargspec(function).args
@@ -151,6 +180,9 @@ def run_experiment(n_runs=3):
                 result = {}
             assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
             assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
+            mpf_log = client[role_id].pull('mpf_log', block=True)
+            for line, out in mpf_log:
+                run_logger.info('\n'.join([line] + out), extra={'function': function.__name__, 'role': role})
             row.update(result)
         results.append(row)
         variable_values.append(tuple(experiment_values.values()))
