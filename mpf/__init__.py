@@ -20,6 +20,7 @@ random.seed('mpf')
 
 variables: Dict[str, 'Variable'] = {}
 functions: List[Tuple[str, int, Callable]] = []
+helpers: List[Callable] = []
 roles: Dict[str, 'Role'] = {}
 experiment_globals: Dict[str, Any] = {}
 
@@ -120,6 +121,13 @@ def run(role: str='main', delay: int=0):
         return func
     return inner
 
+def helper():
+    """ Registers the given function as an helper to be pushed on engines. """
+    def inner(func):
+        helpers.append(func)
+        return func
+    return inner
+
 def run_experiment(n_runs=3):
     """ Runs the experiment and returns the results gathered. """
     results = []
@@ -130,6 +138,7 @@ def run_experiment(n_runs=3):
         row = {}
         for role, delay, function in functions:
             role_id = list(roles).index(role)
+            client[role_id].push({f.__name__: f for f in helpers}, block=True)
             sleep(delay)
             mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}}
             function_args = inspect.getfullargspec(function).args
