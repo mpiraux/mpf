@@ -9,12 +9,15 @@ import ipyparallel as ipp
 import pandas as pd
 import random
 import logging
+import math
 from tqdm.auto import tqdm
 
-
-from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Callable
+from dataclasses import dataclass, field
+from itertools import count
+from typing import Any, Dict, List, Tuple, Callable, Union
 from time import sleep
+
+import mpf.wsp as wsp
 
 run_logger = logging.getLogger('run')
 run_logger.setLevel(logging.WARNING)
@@ -32,6 +35,7 @@ functions: List[Tuple[str, int, Callable]] = []
 helpers: List[Callable] = []
 roles: Dict[str, 'Role'] = {}
 experiment_globals: Dict[str, Any] = {}
+wsp_points: List[List[float]] = []
 
 @dataclass
 class Variable():
@@ -51,19 +55,62 @@ class Variable():
     def explore(variables: List['Variable']):
         """ Yields dictionaries with a value within the range of each variables.
 
-        >>> v1 = Variable('a', [1, 2, 3])
+        >>> v1 = Variable('a', [1, 2])
         >>> v2 = Variable('b', ['x', 'y'])
         >>> list(Variable.explore([v1, v2]))
-        [{'a': 1, 'b': 'x'}, {'a': 1, 'b': 'y'}, {'a': 2, 'b': 'x'}, {'a': 2, 'b': 'y'}, {'a': 3, 'b': 'x'}, {'a': 3, 'b': 'y'}]
+        [{'a': 1, 'b': 'x'}, {'a': 1, 'b': 'y'}, {'a': 2, 'b': 'x'}, {'a': 2, 'b': 'y'}]
+        >>> v3 = WSPVariable('c', values=[], range=[4, 8], index=0)
+        >>> wsp_points.clear()
+        >>> wsp_points.extend([[0], [0.5]])
+        >>> list(Variable.explore([v1, v2, v3]))
+        [{'a': 1, 'b': 'x', 'c': 4}, {'a': 1, 'b': 'x', 'c': 6.0}, {'a': 1, 'b': 'y', 'c': 4}, {'a': 1, 'b': 'y', 'c': 6.0}, {'a': 2, 'b': 'x', 'c': 4}, {'a': 2, 'b': 'x', 'c': 6.0}, {'a': 2, 'b': 'y', 'c': 4}, {'a': 2, 'b': 'y', 'c': 6.0}]
         """
-        if len(variables) > 0:
-            variable = variables[0]
-            for value in variable:
-                if len(variables) > 1:
-                    for v in Variable.explore(variables[1:]):
-                        yield {variable.name: value} | v
-                else:
-                    yield {variable.name: value}
+        def wsp_values(wsp_variables: List[WSPVariable]) -> List[Dict[str, Any]]:
+            return [{wsp_variables[i].name: v for i, v in enumerate(values)} for values in zip(*wsp_variables)]
+
+        def explore_variables(variables: List[Variable], wsp_variables: List[WSPVariable]):
+            if variables:
+                variable = variables[0]
+                for value in variable:
+                    if len(variables) > 1:
+                        for v in explore_variables(variables[1:], wsp_variables):
+                            yield {variable.name: value} | v
+                    elif wsp_variables:
+                        for wsp_vals in wsp_values(wsp_variables):
+                            yield {variable.name: value} | wsp_vals
+                    else:
+                        yield {variable.name: value}
+            
+        if any(type(v) is not WSPVariable for v in variables):
+            yield from explore_variables([v for v in variables if type(v) is not WSPVariable], [v for v in variables if type(v) is WSPVariable])
+        else:
+            yield from wsp_values(variables)
+
+@dataclass
+class WSPVariable(Variable):
+    """ A variable to explore based on the WSP space filling algorithm in an experiment. 
+    
+    >>> v1 = WSPVariable('a', values=[], range=[4, 8], index=0)
+    >>> wsp_points.clear()
+    >>> wsp_points.extend([[0, 1], [0.5, 0.01], [1, 0.33]])
+    >>> list(v1)
+    [4, 6.0, 8]
+    >>> v2 = WSPVariable('b', values=['A', 'B', 'C', 'D'], index=1)
+    >>> list(v2)
+    ['D', 'A', 'B']
+    """
+    range: List[Union[int, float]] = field(default_factory=list)
+    index: int = field(default_factory=count().__next__)
+
+    def __iter__(self):
+        assert wsp_points, f"No WSP points, please set wsp_target= in run_experiment()"
+        assert len(wsp_points[0]) > self.index, "Not enough dimensions in wsp_points"
+        wsp_values = [v[self.index] for v in wsp_points]
+        if self.range:
+            return iter([self.range[0] + (self.range[1] - self.range[0]) * v for v in wsp_values])
+        else:
+            return iter([list(self.values)[int(math.ceil(v * len(self.values)) - 1)] for v in wsp_values])
+
 
 @dataclass
 class Role():
@@ -136,6 +183,16 @@ def add_variable(name: str, values):
         values = list(values)
     variables[name] = Variable(name, values)
 
+def add_wsp_variable(name: str, values=None, range=None):
+    """ Adds the given variable and delegates the choice of its values the WSP space filling algorithm.
+        To provide a fixed set of values that will be explored, use the values argument.
+        To provide a range from which values will be sampled by WSP, use the range argument.
+    """
+    assert name not in variables, f"variable {name} already exists"
+    assert name not in RESERVED_VARIABLES, f"variable {name} is reserved"
+    assert values is not None or range is not None, "One of values and range must be not None"
+    variables[name] = WSPVariable(name, values=values or [], range=range or [])
+
 def register_globals(**kwargs):
     """ Updates the experiment global variables with the given names and values. """
     experiment_globals.update(kwargs)
@@ -155,10 +212,14 @@ def helper():
         return func
     return inner
 
-def run_experiment(n_runs=3, log_ex=False):
+def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
     """ Runs the experiment and returns the results gathered. """
     if log_ex:
         run_logger.setLevel(logging.INFO)
+    if wsp_target is not None:
+        ps = wsp.PointSet.from_random(wsp_target * 100, sum([type(v) is WSPVariable for v in variables.values()]), 'mpf')
+        ps.adaptive_wsp(wsp_target)
+        wsp_points.extend(ps.get_remaining())
     results = []
     variable_values = []
     experiments = list(Variable.explore(list(variables.values()))) * n_runs
@@ -205,10 +266,11 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
     return cluster.connect_client_sync(sshserver=controller_node)
 
-parser = argparse.ArgumentParser(description='mpf experiment')
-parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True,help='The YAML file describing the cluster')
-args = parser.parse_args()
+if __name__ == "mpf":
+    parser = argparse.ArgumentParser(description='mpf experiment')
+    parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True,help='The YAML file describing the cluster')
+    args = parser.parse_args()
 
-if args.cluster:
-    client = start_cluster_and_connect_client(args.cluster)
-    client.wait_for_engines(timeout=10, block=True)
+    if args.cluster:
+        client = start_cluster_and_connect_client(args.cluster)
+        client.wait_for_engines(timeout=10, block=True)
