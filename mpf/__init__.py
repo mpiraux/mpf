@@ -159,10 +159,15 @@ c.SSHLauncher.remote_python = '{python_path}'"""
     with open(os.path.join(profile_dir, 'startup', '00-mpf_exec.ipy'), 'w') as mpf_exec_file:
         mpf_exec_file.write("""
 from IPython.core.magic import register_line_magic
+import shlex
 def ex(*args):
     global mpf_log
     line = ' '.join(args)
-    out = !$line
+    if any(s == '&' for s in shlex.shlex(line)):
+        out = []
+        !$line
+    else:
+        out = !$line
     mpf_log.append((line, out))
     return out
 register_line_magic(ex)
