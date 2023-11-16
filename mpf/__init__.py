@@ -135,7 +135,7 @@ def create_profile(profile_dir: str, cluster: dict):
         engines[engine] = 1  # Starts one engine per host
 
     # The controller is the ipyparallel controller listening for external connections
-    controller_node = cluster['controller']['hostname']
+    controller_node = f"{cluster['controller']['user']}@{cluster['controller']['hostname']}"
     controller_ip = cluster['controller']['control_ip']
     controller_ports = cluster['controller']['ports']
 
@@ -145,6 +145,7 @@ def create_profile(profile_dir: str, cluster: dict):
 
     with open(os.path.join(profile_dir, 'ipcluster_config.py'), 'a') as config:
         config.write("""
+c.Cluster.n = {n}
 c.Cluster.engine_launcher_class = 'ssh'
 c.SSHEngineSetLauncher.engines = {engines}
 c.SSHEngineSetLauncher.remote_profile_dir = '/tmp/mpf-ipy-profile'
@@ -152,7 +153,7 @@ c.Cluster.controller_launcher_class = 'ssh'
 c.SSHControllerLauncher.location = '{controller_node}'
 c.SSHControllerLauncher.controller_cmd = ['{python_path}', '-m', 'ipyparallel.controller', '--ip={controller_ip}']
 c.SSHLauncher.remote_python = '{python_path}'"""
-    .format(engines=repr(engines), controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path']))
+    .format(n=len(engines), engines=repr(engines), controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path']))
 
     with open(os.path.join(profile_dir, 'ipcontroller_config.py'), 'a') as config:
         config.write("c.IPController.ports = {}".format(repr(controller_ports)))
@@ -271,7 +272,7 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
     for machine_spec in cluster_definition['machines']:
         assert machine_spec['role'] not in roles, f"role {machine_spec['role']} already exists"
         roles[machine_spec['role']] = Role(machine_spec['role'], [], machine_spec['interfaces'])
-    controller_node = cluster_definition['machines'][0]['hostname']
+    controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
     try:
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
     except FileNotFoundError:
