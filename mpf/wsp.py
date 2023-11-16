@@ -209,7 +209,7 @@ if __name__ == "__main__":
                 continue
             assert ps.distance_matrix[i][j] >= d_min
 
-    ps = PointSet.from_random(10000, 4, "test")
+    ps = PointSet.from_random(100 * 10 * 4, 4, "test")
     ps.adaptive_wsp(100, True)
 
     print("All tests passed")

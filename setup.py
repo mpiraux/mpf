@@ -14,6 +14,7 @@ setup(
         'ipyparallel >= 8.6', 
         'pandas >= 1.5',
         'PyYAML >= 6.0',
+        'scipy >= 1.11',
         'tqdm'
         ],
 )

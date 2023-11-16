@@ -227,14 +227,37 @@ def helper():
         return func
     return inner
 
+def exec_func(role, function, experiment_values=None, delay=0):
+    role_id = list(roles).index(role)
+    client[role_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}), block=True)
+    sleep(delay)
+    mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}, 'role': role}
+    function_args = inspect.getfullargspec(function).args
+    call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
+    if 'mpf_ctx' in function_args:
+        call_args['mpf_ctx'] = mpf_ctx
+    client[role_id].push(experiment_globals)
+    result = client[role_id].apply_sync(function, **call_args)
+    if result is None:
+        result = {}
+    assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
+    mpf_log = client[role_id].pull('mpf_log', block=True)
+    for line, out in mpf_log:
+        run_logger.info('\n'.join([line] + out), extra={'function': function.__name__, 'role': role})
+    return result
+
 def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
     """ Runs the experiment and returns the results gathered. """
     if log_ex:
         run_logger.setLevel(logging.INFO)
     if wsp_target is not None:
-        ps = wsp.PointSet.from_random(wsp_target * 100, sum([type(v) is WSPVariable for v in variables.values()]), 'mpf')
+        wsp_dimensions = sum([type(v) is WSPVariable for v in variables.values()])
+        ps = wsp.PointSet.from_random(wsp_target * 10 * wsp_dimensions, wsp_dimensions, 'mpf')
         ps.adaptive_wsp(wsp_target)
         wsp_points.extend(ps.get_remaining())
+        del ps
+    for role, function in init_functions:
+        exec_func(role, function)
     results = []
     variable_values = []
     experiments = list(Variable.explore(list(variables.values()))) * n_runs
@@ -242,23 +265,8 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
     for experiment_values in tqdm(experiments):
         row = {}
         for role, delay, function in functions:
-            role_id = list(roles).index(role)
-            client[role_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}), block=True)
-            sleep(delay)
-            mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}, 'role': role}
-            function_args = inspect.getfullargspec(function).args
-            call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
-            if 'mpf_ctx' in function_args:
-                call_args['mpf_ctx'] = mpf_ctx
-            client[role_id].push(experiment_globals)
-            result = client[role_id].apply_sync(function, **call_args)
-            if result is None:
-                result = {}
-            assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
+            result = exec_func(role, function, experiment_values, delay)
             assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
-            mpf_log = client[role_id].pull('mpf_log', block=True)
-            for line, out in mpf_log:
-                run_logger.info('\n'.join([line] + out), extra={'function': function.__name__, 'role': role})
             row.update(result)
         results.append(row)
         variable_values.append(tuple(experiment_values.values()))
