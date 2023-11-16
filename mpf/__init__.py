@@ -32,6 +32,7 @@ random.seed('mpf')
 
 variables: Dict[str, 'Variable'] = {}
 functions: List[Tuple[str, int, Callable]] = []
+init_functions: List[Tuple[str, Callable]] = []
 helpers: List[Callable] = []
 roles: Dict[str, 'Role'] = {}
 experiment_globals: Dict[str, Any] = {}
@@ -203,10 +204,18 @@ def register_globals(**kwargs):
     experiment_globals.update(kwargs)
 
 def run(role: str='main', delay: int=0):
-    """ Registers the given function to be executed by a role at given time. """
+    """ Registers the given function to be executed by a role at given time as part of the experiment. """
     assert role in roles, f"role {role} is not defined in the cluster"
     def inner(func):
         functions.append((role, delay, func))
+        return func
+    return inner
+
+def init(role: str='main'):
+    """ Registers the given function to be executed before the start of the experiment. """
+    assert role in roles, f"role {role} is not defined in the cluster"
+    def inner(func):
+        init_functions.append((role, func))
         return func
     return inner
 
