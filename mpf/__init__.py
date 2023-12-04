@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 
 from dataclasses import dataclass, field
 from itertools import count
-from typing import Any, Dict, List, Tuple, Callable, Union
+from typing import Any, Dict, List, Optional, Tuple, Callable, Union
 from time import sleep
 
 import mpf.wsp as wsp
@@ -119,6 +119,9 @@ class Role():
         and the network interfaces of the underlying machine
     """
     name: str
+    machine_id: int
+    namespace: Optional[str]
+    cpu_id: Optional[int]
     functions: List[Tuple[int, Any]]  # A list of tuple of delay value and IPython function to execute
     interfaces: List[Tuple[str, str]]  # A list of tuple interface name, ip address
 
@@ -164,6 +167,11 @@ from IPython.core.magic import register_line_magic
 import shlex
 def ex(*args):
     global mpf_log
+    global mpf_ex_ctx
+    if mpf_ex_ctx.get('cpu_id') is not None:
+        args = ('taskset', '-c', str(mpf_ex_ctx['cpu_id'])) + args
+    if mpf_ex_ctx.get('namespace') is not None:
+        args = ('ip', 'netns', 'exec', mpf_ex_ctx['namespace']) + args
     line = ' '.join(args)
     if any(s == '&' for s in shlex.shlex(line)):
         out = []
@@ -228,20 +236,21 @@ def helper():
     return inner
 
 def exec_func(role, function, experiment_values=None, delay=0):
-    role_id = list(roles).index(role)
-    client[role_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}), block=True)
+    machine_id = roles[role].machine_id
+    client[machine_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}))
     sleep(delay)
     mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}, 'role': role}
+    experiment_globals['mpf_ex_ctx'] = {'namespace': roles[role].namespace, 'cpu_id': roles[role].cpu_id}
     function_args = inspect.getfullargspec(function).args
     call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
     if 'mpf_ctx' in function_args:
         call_args['mpf_ctx'] = mpf_ctx
-    client[role_id].push(experiment_globals)
-    result = client[role_id].apply_sync(function, **call_args)
+    client[machine_id].push(experiment_globals)
+    result = client[machine_id].apply_sync(function, **call_args)
     if result is None:
         result = {}
     assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
-    mpf_log = client[role_id].pull('mpf_log', block=True)
+    mpf_log = client[machine_id].pull('mpf_log', block=True)
     for line, out in mpf_log:
         run_logger.info('\n'.join([line] + out), extra={'function': function.__name__, 'role': role})
     return result
@@ -277,9 +286,15 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
 def start_cluster_and_connect_client(cluster_file: FileIO):
     cluster_profile = f"profile_{os.path.basename(cluster_file.name)}"
     cluster_definition = yaml.safe_load(cluster_file)
-    for machine_spec in cluster_definition['machines']:
-        assert machine_spec['role'] not in roles, f"role {machine_spec['role']} already exists"
-        roles[machine_spec['role']] = Role(machine_spec['role'], [], machine_spec['interfaces'])
+    for machine_id, machine_spec in enumerate(cluster_definition['machines']):
+        assert 'namespaces' not in machine_spec or 'role' not in machine_spec, f"machine {machine_spec['hostname']} can't have namespaces and a single role"
+        assert 'namespaces' in machine_spec or 'role' in machine_spec, f"machine {machine_spec['hostname']} has no namespaces nor a role"
+        machine_roles = [machine_spec] if 'role' in machine_spec else machine_spec['namespaces']
+        for mr in machine_roles:
+            assert mr['role'] not in roles, f"role {mr['role']} already exists"
+            assert 'namespace' in mr or 'namespaces' not in machine_spec, f"roles of machine {machine_spec['hostname']} must have a namespace set"
+            roles[mr['role']] = Role(name=mr['role'], machine_id=machine_id, functions=[], interfaces=mr['interfaces'], namespace=mr.get('namespace'), cpu_id=mr.get('cpu_id'))
+
     controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
     try:
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)

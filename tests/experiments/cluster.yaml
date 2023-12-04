@@ -10,6 +10,15 @@ machines: # A list of hostname, role, (optional) user and interfaces keys defini
     interfaces:
       - name: lo
         ip: 127.0.0.1
+  - hostname: localhost
+    user: root
+    namespaces:  # This machine hosts roles within namespaces
+      - role: ns-node
+        namespace: ns-00
+        cpu_id: 1  # Pin processes executed within this namespace to the given CPU
+        interfaces:
+        - name: lo
+          ip: 127.0.0.1
 controller:
   <<: *controller_def
   ports: '65400-65432'
