@@ -165,14 +165,22 @@ c.SSHLauncher.remote_python = '{python_path}'"""
         mpf_exec_file.write("""
 from IPython.core.magic import register_line_magic
 import shlex
-def ex(*args):
+def ex(args):
     global mpf_log
     global mpf_ex_ctx
+    args = args.split()
+    env_variables = []
+    for i, a in enumerate(args):
+        if '=' in a:
+            env_variables.append(a)
+        else:
+            args = args[i:]
+            break
     if mpf_ex_ctx.get('cpu_id') is not None:
-        args = ('taskset', '-c', str(mpf_ex_ctx['cpu_id'])) + args
+        args = ['taskset', '-c', str(mpf_ex_ctx['cpu_id'])] + args
     if mpf_ex_ctx.get('namespace') is not None:
-        args = ('ip', 'netns', 'exec', mpf_ex_ctx['namespace']) + args
-    line = ' '.join(args)
+        args = ['ip', 'netns', 'exec', mpf_ex_ctx['namespace']] + args
+    line = ' '.join(env_variables + args)
     if any(s == '&' for s in shlex.shlex(line)):
         out = []
         !$line
