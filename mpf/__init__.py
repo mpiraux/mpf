@@ -1,6 +1,7 @@
 from io import FileIO
 import os
 import inspect
+import string
 import yaml
 import subprocess
 import argparse
@@ -28,7 +29,6 @@ if not run_logger.hasHandlers():
     run_logger.addHandler(sh)
 
 RESERVED_VARIABLES = {'mpf_ctx'}
-random.seed('mpf')
 
 variables: Dict[str, 'Variable'] = {}
 functions: List[Tuple[str, int, Callable]] = []
@@ -37,6 +37,10 @@ helpers: List[Callable] = []
 roles: Dict[str, 'Role'] = {}
 experiment_globals: Dict[str, Any] = {}
 wsp_points: List[List[float]] = []
+engines: List[str] = []
+
+experiment_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+random.seed('mpf')
 
 @dataclass
 class Variable():
@@ -130,13 +134,6 @@ def create_profile(profile_dir: str, cluster: dict):
         and sets up the IPython engines based on the given YAML cluster file.
         Creates the roles available from the cluster definition.
     """
-    engines = {}
-    for machine_spec in cluster['machines']:
-        engine = machine_spec['hostname']
-        if 'user' in machine_spec:
-            engine = f"{machine_spec['user']}@{engine}"
-        engines[engine] = 1  # Starts one engine per host
-
     # The controller is the ipyparallel controller listening for external connections
     controller_node = f"{cluster['controller']['user']}@{cluster['controller']['hostname']}"
     controller_ip = cluster['controller']['control_ip']
@@ -156,13 +153,13 @@ c.Cluster.controller_launcher_class = 'ssh'
 c.SSHControllerLauncher.location = '{controller_node}'
 c.SSHControllerLauncher.controller_cmd = ['{python_path}', '-m', 'ipyparallel.controller', '--ip={controller_ip}']
 c.SSHLauncher.remote_python = '{python_path}'"""
-    .format(n=len(engines), engines=repr(engines), controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path']))
+    .format(n=len(engines), engines=repr({e: 1 for e in engines}), controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path']))
 
     with open(os.path.join(profile_dir, 'ipcontroller_config.py'), 'a') as config:
         config.write("c.IPController.ports = {}".format(repr(controller_ports)))
 
-    with open(os.path.join(profile_dir, 'startup', '00-mpf_exec.ipy'), 'w') as mpf_exec_file:
-        mpf_exec_file.write("""
+    with open(os.path.join(profile_dir, 'startup', '00-mpf_magics.ipy'), 'w') as mpf_magics_file:
+        mpf_magics_file.write("""
 from IPython.core.magic import register_line_magic
 import shlex
 def ex(args):
@@ -190,10 +187,25 @@ def ex(args):
     return out
 register_line_magic(ex)
 del ex
+
+import os
+def md(scope):
+    assert scope in ['exp', 'run', 'role', 'fun'], "Scope for mpf run files directories must be one of ['exp', 'run', 'role', 'fun']"
+    global mpf_ex_ctx
+    global mpf_files
+    mpf_dir = f"/tmp/mpf_experiments/{{mpf_ex_ctx['exp_id']}}/run_{{mpf_ex_ctx['run']:03}}/{{mpf_ex_ctx['role']}}/{{mpf_ex_ctx['fun']}}"
+    for s in ['fun', 'role', 'run', 'exp']:
+        if scope == s:
+            break
+        mpf_dir = os.path.dirname(mpf_dir)
+    os.makedirs(mpf_dir, exist_ok=True)
+    return mpf_dir
+register_line_magic(md)
+del md
         """.format(python_path=cluster['global']['python_path']))
 
     for e in engines:
-        p = subprocess.run(['rsync', '--mkpath', os.path.join(profile_dir, 'startup', '00-mpf_exec.ipy'), f'{e}:/tmp/mpf-ipy-profile/startup/00-mpf_exec.ipy'])
+        p = subprocess.run(['rsync', '--mkpath', os.path.join(profile_dir, 'startup', '00-mpf_magics.ipy'), f'{e}:/tmp/mpf-ipy-profile/startup/00-mpf_magics.ipy'])
         assert p.returncode == 0
 
     return controller_node
@@ -243,12 +255,12 @@ def helper():
         return func
     return inner
 
-def exec_func(role, function, experiment_values=None, delay=0):
+def exec_func(role, function, experiment_values=None, delay=0, ex_ctx={}):
     machine_id = roles[role].machine_id
     client[machine_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}))
     sleep(delay)
     mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}, 'role': role}
-    experiment_globals['mpf_ex_ctx'] = {'namespace': roles[role].namespace, 'cpu_id': roles[role].cpu_id}
+    experiment_globals['mpf_ex_ctx'] = {'namespace': roles[role].namespace, 'cpu_id': roles[role].cpu_id, 'role': role, 'fun': function.__name__, **ex_ctx}
     function_args = inspect.getfullargspec(function).args
     call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
     if 'mpf_ctx' in function_args:
@@ -280,14 +292,17 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
     experiments = list(Variable.explore(list(variables.values()))) * n_runs
     random.shuffle(experiments)
     for experiment_values in tqdm(experiments):
+        run_id = len(results)
         row = {}
         for role, delay, function in functions:
-            result = exec_func(role, function, experiment_values, delay)
+            result = exec_func(role, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id})
             assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
             row.update(result)
         results.append(row)
         variable_values.append(tuple(experiment_values.values()))
         client.abort()
+        for e in engines:
+            subprocess.run(['rsync', '-C', '-r', '--mkpath', f"{e}:/tmp/mpf_experiments/{experiment_id}/run_{run_id:03}/", f"{experiment_dir}/run_{run_id:03}/"])
     index = pd.MultiIndex.from_tuples(variable_values, names=[v.name for v in variables.values()])
     return pd.DataFrame(results, index=index)
 
@@ -302,6 +317,7 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
             assert mr['role'] not in roles, f"role {mr['role']} already exists"
             assert 'namespace' in mr or 'namespaces' not in machine_spec, f"roles of machine {machine_spec['hostname']} must have a namespace set"
             roles[mr['role']] = Role(name=mr['role'], machine_id=machine_id, functions=[], interfaces=mr['interfaces'], namespace=mr.get('namespace'), cpu_id=mr.get('cpu_id'))
+        engines.append(machine_spec['hostname'] if 'user' not in machine_spec else f"{machine_spec['user']}@{machine_spec['hostname']}")
 
     controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
     try:
@@ -314,9 +330,13 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
 
 if __name__ == "mpf":
     parser = argparse.ArgumentParser(description='mpf experiment')
-    parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True,help='The YAML file describing the cluster')
+    parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True, help='The YAML file describing the cluster')
     args = parser.parse_args()
 
-    if args.cluster:
-        client = start_cluster_and_connect_client(args.cluster)
-        client.wait_for_engines(timeout=10, block=True)
+    experiment_dir = os.path.join('mpf_experiments', experiment_id)
+    os.makedirs(experiment_dir)
+    shutil.copy(args.cluster.name ,experiment_dir)
+    shutil.copy(parser.prog, experiment_dir)
+
+    client = start_cluster_and_connect_client(args.cluster)
+    client.wait_for_engines(timeout=10, block=True)
