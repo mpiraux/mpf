@@ -1,0 +1,14 @@
+#!/usr/bin/env -S ipython --
+import mpf
+
+mpf.add_variable('var', values=[0])
+
+for r in mpf.roles:
+    @mpf.run(role=r)
+    def interface(mpf_ctx):
+        out = %md run
+        with open(out + '/' + mpf_ctx['role'], 'w') as f:
+            f.write(mpf_ctx['role'])
+        return {mpf_ctx['role']: out}
+
+print(mpf.run_experiment(n_runs=1, log_ex=False))
