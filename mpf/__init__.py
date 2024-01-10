@@ -14,6 +14,7 @@ import math
 from tqdm.auto import tqdm
 
 from dataclasses import dataclass, field
+from collections import namedtuple
 from itertools import count
 from typing import Any, Dict, List, Optional, Tuple, Callable, Union
 from time import sleep
@@ -31,13 +32,21 @@ if not run_logger.hasHandlers():
 RESERVED_VARIABLES = {'mpf_ctx'}
 
 variables: Dict[str, 'Variable'] = {}
-functions: List[Tuple[str, int, Callable]] = []
+functions: List[Tuple[str, int, str, Callable]] = []
 init_functions: List[Tuple[str, Callable]] = []
 helpers: List[Callable] = []
 roles: Dict[str, 'Role'] = {}
 experiment_globals: Dict[str, Any] = {}
 wsp_points: List[List[float]] = []
 engines: List[str] = []
+links: Dict[str, 'Link'] = {}
+
+LinkIface = namedtuple('LinkIface', ['role', 'iface', 'direction'])
+
+@dataclass
+class Link:
+    _0: LinkIface = None
+    _1: LinkIface = None
 
 experiment_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
 random.seed('mpf')
@@ -232,11 +241,13 @@ def register_globals(**kwargs):
     """ Updates the experiment global variables with the given names and values. """
     experiment_globals.update(kwargs)
 
-def run(role: str='main', delay: int=0):
+def run(role: str='main', delay: int=0, link: str=None):
     """ Registers the given function to be executed by a role at given time as part of the experiment. """
     assert role in roles, f"role {role} is not defined in the cluster"
+    if link is not None:
+        assert link in links, f"link {link} is not defined in the cluster"
     def inner(func):
-        functions.append((role, delay, func))
+        functions.append((role, delay, link, func))
         return func
     return inner
 
@@ -255,11 +266,13 @@ def helper():
         return func
     return inner
 
-def exec_func(role, function, experiment_values=None, delay=0, ex_ctx={}):
+def exec_func(role, link, function, experiment_values=None, delay=0, ex_ctx={}):
     machine_id = roles[role].machine_id
     client[machine_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}))
     sleep(delay)
     mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}, 'role': role}
+    if link is not None:
+        mpf_ctx.update({'direction': link.direction, 'interface': link.iface})
     experiment_globals['mpf_ex_ctx'] = {'namespace': roles[role].namespace, 'cpu_id': roles[role].cpu_id, 'role': role, 'fun': function.__name__, **ex_ctx}
     function_args = inspect.getfullargspec(function).args
     call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
@@ -294,10 +307,15 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
     for experiment_values in tqdm(experiments):
         run_id = len(results)
         row = {}
-        for role, delay, function in functions:
-            result = exec_func(role, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id})
-            assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
-            row.update(result)
+        for role, delay, link, function in functions:
+            roles = [role] if link is None else [links[link]._0.role, links[link]._1.role]
+            for idx, role in enumerate(roles):
+                result = exec_func(role, getattr(links[link], f'_{idx}') if link is not None else None, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id})
+                # Quick fix for key duplication avoidance
+                # if link is not None:
+                #     result = {f'{role}_{k}': v for k,v in result.items()}
+                assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
+                row.update(result)
         results.append(row)
         variable_values.append(tuple(experiment_values.values()))
         client.abort()
@@ -317,6 +335,24 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
             assert mr['role'] not in roles, f"role {mr['role']} already exists"
             assert 'namespace' in mr or 'namespaces' not in machine_spec, f"roles of machine {machine_spec['hostname']} must have a namespace set"
             roles[mr['role']] = Role(name=mr['role'], machine_id=machine_id, functions=[], interfaces=mr['interfaces'], namespace=mr.get('namespace'), cpu_id=mr.get('cpu_id'))
+            for iface in mr['interfaces']:
+                ifname = iface['name']
+                try:
+                    link = iface['link']
+                    assert 'id' in link, f'missing id in link for interface {ifname}'
+                    assert 'ord' in link, f'missing ord in link for interface {ifname}'
+                    link_id = link['id']
+                    ord = link['ord']
+                    assert ord in [0, 1], f'Invalid ord'
+                    ord = f'_{ord}'
+                    e = LinkIface(mr['role'], ifname, 'forward' if link['ord'] == 0 else 'reverse')
+                    try:
+                        assert getattr(links[link_id], ord) is None, f'Duplicate interface for link {link_id}'
+                        setattr(links[link_id], ord, e)
+                    except KeyError:
+                        links[link_id] = Link(**{ord:e})
+                except KeyError:
+                    pass
         engines.append(machine_spec['hostname'] if 'user' not in machine_spec else f"{machine_spec['user']}@{machine_spec['hostname']}")
 
     controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
