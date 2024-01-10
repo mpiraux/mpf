@@ -29,7 +29,7 @@ sh.setFormatter(logging.Formatter('%(asctime)s [%(role)s] %(function)s: %(messag
 if not run_logger.hasHandlers():
     run_logger.addHandler(sh)
 
-RESERVED_VARIABLES = {'mpf_ctx'}
+RESERVED_VARIABLES = {'mpf_ctx', 'target'}
 
 variables: Dict[str, 'Variable'] = {}
 functions: List[Tuple[str, int, str, Callable]] = []
@@ -227,6 +227,13 @@ def add_variable(name: str, values):
         values = list(values)
     variables[name] = Variable(name, values)
 
+def add_target(values):
+    name = 'target'
+    try:
+        variables[name].values.append(values)
+    except KeyError:
+        variables[name] = Variable(name, values)
+
 def add_wsp_variable(name: str, values=None, range=None):
     """ Adds the given variable and delegates the choice of its values the WSP space filling algorithm.
         To provide a fixed set of values that will be explored, use the values argument.
@@ -243,9 +250,9 @@ def register_globals(**kwargs):
 
 def run(role: str='main', delay: int=0, link: str=None):
     """ Registers the given function to be executed by a role at given time as part of the experiment. """
-    assert role in roles, f"role {role} is not defined in the cluster"
+    assert role in roles or role == 'target', f"role {role} is not defined in the cluster"
     if link is not None:
-        assert link in links, f"link {link} is not defined in the cluster"
+        assert link in links or link == 'target', f"link {link} is not defined in the cluster"
     def inner(func):
         functions.append((role, delay, link, func))
         return func
@@ -308,6 +315,12 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
         run_id = len(results)
         row = {}
         for role, delay, link, function in functions:
+            if link == 'target':
+                assert 'target' in experiment_values, f'target requested for link but not specified'
+                link = experiment_values['target']
+            elif role == 'target':
+                assert 'target' in experiment_values, f'target requested for role but not specified'
+                role = experiment_values['target']
             roles = [role] if link is None else [links[link]._0.role, links[link]._1.role]
             for idx, role in enumerate(roles):
                 result = exec_func(role, getattr(links[link], f'_{idx}') if link is not None else None, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id})
