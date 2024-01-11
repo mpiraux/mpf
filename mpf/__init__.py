@@ -273,7 +273,7 @@ def helper():
         return func
     return inner
 
-def exec_func(role, link, function, experiment_values=None, delay=0, ex_ctx={}):
+def exec_func(role, function, link=None, experiment_values=None, delay=0, ex_ctx={}):
     machine_id = roles[role].machine_id
     client[machine_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}))
     sleep(delay)
@@ -323,7 +323,7 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
                 role = experiment_values['target']
             roles = [role] if link is None else [links[link]._0.role, links[link]._1.role]
             for idx, role in enumerate(roles):
-                result = exec_func(role, getattr(links[link], f'_{idx}') if link is not None else None, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id})
+                result = exec_func(role, function, getattr(links[link], f'_{idx}') if link is not None else None, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id})
                 # Quick fix for key duplication avoidance
                 # if link is not None:
                 #     result = {f'{role}_{k}': v for k,v in result.items()}
