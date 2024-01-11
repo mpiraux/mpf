@@ -353,13 +353,16 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
     cluster_profile = f"profile_{os.path.basename(cluster_file.name)}"
     cluster_definition = yaml.safe_load(cluster_file)
     for machine_id, machine_spec in enumerate(cluster_definition['machines']):
-        assert 'namespaces' not in machine_spec or 'role' not in machine_spec, f"machine {machine_spec['hostname']} can't have namespaces and a single role"
         assert 'namespaces' in machine_spec or 'role' in machine_spec, f"machine {machine_spec['hostname']} has no namespaces nor a role"
-        machine_roles = [machine_spec] if 'role' in machine_spec else machine_spec['namespaces']
+        machine_roles = []
+        if 'role' in machine_spec:
+            # TODO: remove useless copy of namespaces if present
+            machine_roles.append(machine_spec)
+        if 'namespaces' in machine_spec:
+            machine_roles.extend(machine_spec['namespaces'])
         for mr in machine_roles:
             assert mr['role'] not in roles, f"role {mr['role']} already exists"
             assert mr['role'] not in variables and mr['role'] not in links, f"{mr['role']} already exists among variables, roles and links"
-            assert 'namespace' in mr or 'namespaces' not in machine_spec, f"roles of machine {machine_spec['hostname']} must have a namespace set"
             interfaces = []
             for itf in mr['interfaces']:
                 link_name = itf.get('link')
