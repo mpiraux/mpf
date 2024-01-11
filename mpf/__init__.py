@@ -193,7 +193,7 @@ def md(scope):
     assert scope in ['exp', 'run', 'role', 'fun'], "Scope for mpf run files directories must be one of ['exp', 'run', 'role', 'fun']"
     global mpf_ex_ctx
     global mpf_files
-    mpf_dir = f"/tmp/mpf_experiments/{{mpf_ex_ctx['exp_id']}}/run_{{mpf_ex_ctx['run']:03}}/{{mpf_ex_ctx['role']}}/{{mpf_ex_ctx['fun']}}"
+    mpf_dir = f"/dev/shm/mpf_experiments/{{mpf_ex_ctx['exp_id']}}/run_{{mpf_ex_ctx['run']:03}}/{{mpf_ex_ctx['role']}}/{{mpf_ex_ctx['fun']}}"
     for s in ['fun', 'role', 'run', 'exp']:
         if scope == s:
             break
@@ -302,7 +302,7 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
         variable_values.append(tuple(experiment_values.values()))
         client.abort()
         for e in engines:
-            subprocess.run(['rsync', '-C', '-r', '--mkpath', f"{e}:/tmp/mpf_experiments/{experiment_id}/run_{run_id:03}/", f"{experiment_dir}/run_{run_id:03}/"])
+            subprocess.run(['rsync', '-C', '-r', '--mkpath', '--remove-source-files', f"{e}:/dev/shm/mpf_experiments/{experiment_id}/run_{run_id:03}/", f"{experiment_dir}/run_{run_id:03}/"])
     index = pd.MultiIndex.from_tuples(variable_values, names=[v.name for v in variables.values()])
     return pd.DataFrame(results, index=index)
 
