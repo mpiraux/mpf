@@ -10,6 +10,8 @@ machines: # A list of hostname, role, (optional) user and interfaces keys defini
     interfaces:
       - name: lo
         ip: 127.0.0.1
+        link: loopback  # Link identifier for this interface
+        direction: forward  # Direction of this interface regarding the link, if omitted it is deduced from the parsing order
   - hostname: localhost
     user: root
     namespaces:  # This machine hosts roles within namespaces
