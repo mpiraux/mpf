@@ -1,5 +1,6 @@
 from io import FileIO
 import os
+import sys
 import inspect
 import string
 import yaml
@@ -336,7 +337,7 @@ if __name__ == "mpf":
     experiment_dir = os.path.join('mpf_experiments', experiment_id)
     os.makedirs(experiment_dir)
     shutil.copy(args.cluster.name ,experiment_dir)
-    shutil.copy(parser.prog, experiment_dir)
+    shutil.copy(sys.argv[0], experiment_dir)
 
     client = start_cluster_and_connect_client(args.cluster)
     client.wait_for_engines(timeout=10, block=True)
