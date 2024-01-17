@@ -240,6 +240,7 @@ del md
 def add_variable(name: str, values):
     """ Adds the given variable and values to explore in the experiment. """
     assert name not in variables, f"variable {name} already exists"
+    assert name not in roles and name not in links, f"{name} already exists among variables, roles and links"
     assert name not in RESERVED_VARIABLES, f"variable {name} is reserved"
     if type(values) is range:
         values = list(values)
@@ -251,6 +252,7 @@ def add_wsp_variable(name: str, values=None, range=None):
         To provide a range from which values will be sampled by WSP, use the range argument.
     """
     assert name not in variables, f"variable {name} already exists"
+    assert name not in roles and name not in links, f"{name} already exists among variables, roles and links"
     assert name not in RESERVED_VARIABLES, f"variable {name} is reserved"
     assert values is not None or range is not None, "One of values and range must be not None"
     variables[name] = WSPVariable(name, values=values or [], range=range or [])
@@ -262,8 +264,8 @@ def register_globals(**kwargs):
 def run(role: Optional[str]=None, link: Optional[str]=None, delay: int=0):
     """ Registers the given function to be executed by a role at given time as part of the experiment. """
     assert role or link, "at least one of role or link must be set"
-    assert role is None or role in roles, f"role {role} is not defined in the cluster"
-    assert link is None or link in links, f"link {link} is not defined in the cluster"
+    assert role is None or role in roles or role in variables, f"role {role} is not defined in the cluster"
+    assert link is None or link in links or link in variables, f"link {link} is not defined in the cluster"
     assert not (role and link) or (((itf := links[link].forward) or (itf := links[link].backward)) and itf.role == role), f"link {link} has no interface belonging to role {role}"
     def inner(func):
         functions.append((role, link, delay, func))
@@ -327,6 +329,12 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
         run_id = len(results)
         row = {}
         for role, link, delay, function in functions:
+            if role in variables:
+                role = experiment_values[role]
+                assert role in roles, f"Variable role gave value {role} which does not exist"
+            if link in variables:
+                link = experiment_values[link]
+                assert link in links, f"Variable link gave value {link} which does not exist"
             for interface in links[link] if link else [None]:
                 if interface and not role:
                     role = interface.role
@@ -350,10 +358,12 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
         machine_roles = [machine_spec] if 'role' in machine_spec else machine_spec['namespaces']
         for mr in machine_roles:
             assert mr['role'] not in roles, f"role {mr['role']} already exists"
+            assert mr['role'] not in variables and mr['role'] not in links, f"{mr['role']} already exists among variables, roles and links"
             assert 'namespace' in mr or 'namespaces' not in machine_spec, f"roles of machine {machine_spec['hostname']} must have a namespace set"
             interfaces = []
             for itf in mr['interfaces']:
                 link_name = itf.get('link')
+                assert link_name is None or (link_name not in variables and link_name not in roles), f"{link_name} already exists among variables and roles"
                 direction = itf.get('direction', 'forward' if not link_name in links else 'backward')
                 interface = LinkInterface(name=itf['name'], ip=itf['ip'], role=mr['role'], link=link_name, direction=direction, neighbour=itf.get('neighbour'))
                 if link_name and link_name not in links:
