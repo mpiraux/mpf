@@ -240,6 +240,7 @@ del md
 def add_variable(name: str, values):
     """ Adds the given variable and values to explore in the experiment. """
     assert name not in variables, f"variable {name} already exists"
+    assert name not in roles and name not in links, f"{name} already exists among variables, roles and links"
     assert name not in RESERVED_VARIABLES, f"variable {name} is reserved"
     if type(values) is range:
         values = list(values)
@@ -251,6 +252,7 @@ def add_wsp_variable(name: str, values=None, range=None):
         To provide a range from which values will be sampled by WSP, use the range argument.
     """
     assert name not in variables, f"variable {name} already exists"
+    assert name not in roles and name not in links, f"{name} already exists among variables, roles and links"
     assert name not in RESERVED_VARIABLES, f"variable {name} is reserved"
     assert values is not None or range is not None, "One of values and range must be not None"
     variables[name] = WSPVariable(name, values=values or [], range=range or [])
@@ -350,10 +352,12 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
         machine_roles = [machine_spec] if 'role' in machine_spec else machine_spec['namespaces']
         for mr in machine_roles:
             assert mr['role'] not in roles, f"role {mr['role']} already exists"
+            assert mr['role'] not in variables and mr['role'] not in links, f"{mr['role']} already exists among variables, roles and links"
             assert 'namespace' in mr or 'namespaces' not in machine_spec, f"roles of machine {machine_spec['hostname']} must have a namespace set"
             interfaces = []
             for itf in mr['interfaces']:
                 link_name = itf.get('link')
+                assert link_name is None or (link_name not in variables and link_name not in roles), f"{link_name} already exists among variables and roles"
                 direction = itf.get('direction', 'forward' if not link_name in links else 'backward')
                 interface = LinkInterface(name=itf['name'], ip=itf['ip'], role=mr['role'], link=link_name, direction=direction, neighbour=itf.get('neighbour'))
                 if link_name and link_name not in links:
