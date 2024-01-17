@@ -32,7 +32,7 @@ if not run_logger.hasHandlers():
 RESERVED_VARIABLES = {'mpf_ctx'}
 
 variables: Dict[str, 'Variable'] = {}
-functions: List[Tuple[Optional[str], Optional[str], int, Callable]] = []
+functions: List[Tuple[Optional[str], Optional[str], int, bool, Callable]] = []
 init_functions: List[Tuple[str, Callable]] = []
 helpers: List[Callable] = []
 roles: Dict[str, 'Role'] = {}
@@ -139,7 +139,7 @@ class Role():
     machine_id: int
     namespace: Optional[str]
     cpu_id: Optional[int]
-    functions: List[Tuple[int, Any]]  # A list of tuple of delay value and IPython function to execute
+    functions: List[Tuple[int, bool, Any]]  # A list of tuple of delay value, parallel mode, and IPython function to execute
     interfaces: List[LinkInterface]
 
 
@@ -188,10 +188,22 @@ c.SSHLauncher.remote_python = '{python_path}'"""
     with open(os.path.join(profile_dir, 'startup', '00-mpf_magics.ipy'), 'w') as mpf_magics_file:
         mpf_magics_file.write("""
 from IPython.core.magic import register_line_magic
+import inspect
+def get_mpf_ctx():
+    frame = inspect.currentframe()
+    while 'mpf_ctx' not in frame.f_locals:
+        up_frame = frame.f_back
+        del frame
+        frame = up_frame
+    v = frame.f_locals['mpf_ctx']
+    del frame
+    return v
+
 import shlex
 def ex(args):
-    global mpf_log
-    global mpf_ex_ctx
+    mpf_ctx = get_mpf_ctx()
+    mpf_ex_ctx = mpf_ctx['mpf_ex_ctx']
+    mpf_log = globals()[mpf_ctx['mpf_log']]
     args = args.split()
     env_variables = []
     for i, a in enumerate(args):
@@ -217,9 +229,9 @@ del ex
 
 import os
 def md(scope):
+    mpf_ctx = get_mpf_ctx()
     assert scope in ['exp', 'run', 'role', 'fun'], "Scope for mpf run files directories must be one of ['exp', 'run', 'role', 'fun']"
-    global mpf_ex_ctx
-    global mpf_files
+    mpf_ex_ctx = mpf_ctx['mpf_ex_ctx']
     mpf_dir = f"/dev/shm/mpf_experiments/{{mpf_ex_ctx['exp_id']}}/run_{{mpf_ex_ctx['run']:03}}/{{mpf_ex_ctx['role']}}/{{mpf_ex_ctx['fun']}}"
     for s in ['fun', 'role', 'run', 'exp']:
         if scope == s:
@@ -261,14 +273,15 @@ def register_globals(**kwargs):
     """ Updates the experiment global variables with the given names and values. """
     experiment_globals.update(kwargs)
 
-def run(role: Optional[str]=None, link: Optional[str]=None, delay: int=0):
+def run(role: Optional[str]=None, link: Optional[str]=None, delay: int=0, parallel=False):
     """ Registers the given function to be executed by a role at given time as part of the experiment. """
     assert role or link, "at least one of role or link must be set"
     assert role is None or role in roles or role in variables, f"role {role} is not defined in the cluster"
     assert link is None or link in links or link in variables, f"link {link} is not defined in the cluster"
     assert not (role and link) or (((itf := links[link].forward) or (itf := links[link].backward)) and itf.role == role), f"link {link} has no interface belonging to role {role}"
+    assert not parallel or delay == 0, "delay can't be used with parallel"
     def inner(func):
-        functions.append((role, link, delay, func))
+        functions.append((role, link, delay, parallel, func))
         return func
     return inner
 
@@ -304,26 +317,33 @@ def send(role: str, content: dict):
     client[machine_id].push({'_files_to_dump': content}, block=True)
     client[machine_id].execute(_apply_send)
 
-def exec_func(role: str, interface: Optional[LinkInterface], function, experiment_values=None, delay=0, ex_ctx={}):
+def exec_func(role: str, interface: Optional[LinkInterface], function, experiment_values=None, delay=0, ex_ctx={}, parallel=False):
     machine_id = roles[role].machine_id
-    client[machine_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}))
+    mpf_log_global_name = f'_{experiment_id}_{role}_{function.__name__}_log'
+    func_globals = {f.__name__: f for f in helpers}
+    func_globals[mpf_log_global_name] = []
+    client[machine_id].push(func_globals)
     sleep(delay)
     mpf_ctx = {'roles': {r: {'interfaces': [asdict(itf) for itf in roles[r].interfaces]} for r in roles}, 'role': role}
     if interface:
         mpf_ctx['interface'] = asdict(interface)
-    experiment_globals['mpf_ex_ctx'] = {'namespace': roles[role].namespace, 'cpu_id': roles[role].cpu_id, 'role': role, 'fun': function.__name__, **ex_ctx}
+    mpf_ctx['mpf_ex_ctx'] = {'namespace': roles[role].namespace, 'cpu_id': roles[role].cpu_id, 'role': role, 'fun': function.__name__, **ex_ctx}
+    mpf_ctx['mpf_log'] = mpf_log_global_name
     function_args = inspect.getfullargspec(function).args
     call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
     if 'mpf_ctx' in function_args:
         call_args['mpf_ctx'] = mpf_ctx
     client[machine_id].push(experiment_globals)
+    if parallel:
+        return client[machine_id].apply_async(function, **call_args), (role, function.__name__, mpf_log_global_name)
     result = client[machine_id].apply_sync(function, **call_args)
     if result is None:
         result = {}
     assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
-    mpf_log = client[machine_id].pull('mpf_log', block=True)
+    mpf_log = client[machine_id].pull(mpf_log_global_name, block=True)
     for line, out in mpf_log:
         run_logger.info('\n'.join([line] + out), extra={'function': function.__name__, 'role': role})
+    client[machine_id].execute(f"del {mpf_log_global_name}")
     return result
 
 def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
@@ -345,7 +365,22 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
     for experiment_values in tqdm(experiments):
         run_id = len(results)
         row = {}
-        for role, link, delay, function in functions:
+        async_results: List[Tuple[ipp.AsyncResult, Tuple[str, str, str]]] = []  # Stores pending parallel async results with associated role, function name and global mpf_log name
+        for role, link, delay, parallel, function in functions:
+            if not parallel and async_results:
+                ipp.AsyncResult.join([r for r, _ in async_results])
+                for result, async_role, async_fn, log_name in [(r.get(), ro, fn, ln) for r, (ro, fn, ln) in async_results]:
+                    machine_id = roles[async_role].machine_id
+                    if result is None:
+                        result = {}
+                    assert type(result) is dict, "return value of @mpf.run functions should be a dict with the results names and values or None"
+                    assert all(k not in row for k in result.keys()), f"function {async_fn} returned a result name that conflicts with experiment value"
+                    row.update(result)
+                    mpf_log = client[machine_id].pull(log_name, block=True)
+                    for line, out in mpf_log:
+                        run_logger.info('\n'.join([line] + out), extra={'function': async_fn, 'role': role})
+                    client[machine_id].execute(f"del {log_name}")
+                async_results = []
             if role in variables:
                 role = experiment_values[role]
                 assert role in roles, f"Variable role gave value {role} which does not exist"
@@ -354,9 +389,13 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
                 assert link in links, f"Variable link gave value {link} which does not exist"
             for interface in links[link] if link else [None]:
                 r = interface.role if interface and not role else role
-                result = exec_func(r, interface, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id}) # type: ignore
-                assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
-                row.update(result)
+                result = exec_func(r, interface, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id}, parallel=parallel) # type: ignore
+                if parallel:
+                    async_results.append(result) # type: ignore
+                else:
+                    assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
+                    row.update(result)
+        assert not async_results, "Some parallel functions were not joined when the experiment run completed"
         results.append(row)
         variable_values.append(tuple(experiment_values.values()))
         client.abort()
