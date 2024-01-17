@@ -264,8 +264,8 @@ def register_globals(**kwargs):
 def run(role: Optional[str]=None, link: Optional[str]=None, delay: int=0):
     """ Registers the given function to be executed by a role at given time as part of the experiment. """
     assert role or link, "at least one of role or link must be set"
-    assert role is None or role in roles, f"role {role} is not defined in the cluster"
-    assert link is None or link in links, f"link {link} is not defined in the cluster"
+    assert role is None or role in roles or role in variables, f"role {role} is not defined in the cluster"
+    assert link is None or link in links or link in variables, f"link {link} is not defined in the cluster"
     assert not (role and link) or (((itf := links[link].forward) or (itf := links[link].backward)) and itf.role == role), f"link {link} has no interface belonging to role {role}"
     def inner(func):
         functions.append((role, link, delay, func))
@@ -329,6 +329,12 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
         run_id = len(results)
         row = {}
         for role, link, delay, function in functions:
+            if role in variables:
+                role = experiment_values[role]
+                assert role in roles, f"Variable role gave value {role} which does not exist"
+            if link in variables:
+                link = experiment_values[link]
+                assert link in links, f"Variable link gave value {link} which does not exist"
             for interface in links[link] if link else [None]:
                 if interface and not role:
                     role = interface.role
