@@ -256,6 +256,22 @@ def helper():
         return func
     return inner
 
+def send(role: str, content: dict):
+    """ Send files to the specified role
+        @param[in]  content: A dictionary whose keys are paths on the host and values the file
+                             content to dump
+    """
+    assert role in roles, f'role {role} not defined in roles'
+    assert type(content) is dict, f'content must be a dict'
+    machine_id = roles[role].machine_id
+    _apply_send = """
+    for dst, content in _files_to_dump.items():
+        with open(dst, 'w') as fd:
+            fd.write(content)
+    """
+    client[machine_id].push({'_files_to_dump': content}, block=True)
+    client[machine_id].execute(_apply_send)
+
 def exec_func(role, function, experiment_values=None, delay=0, ex_ctx={}):
     machine_id = roles[role].machine_id
     client[machine_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}))
