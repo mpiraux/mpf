@@ -268,6 +268,7 @@ def send(role: str, content: dict):
     for dst, content in _files_to_dump.items():
         with open(dst, 'w') as fd:
             fd.write(content)
+    del _files_to_dump
     """
     client[machine_id].push({'_files_to_dump': content}, block=True)
     client[machine_id].execute(_apply_send)
