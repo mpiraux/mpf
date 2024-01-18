@@ -380,7 +380,7 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
                     row.update(result)
                     mpf_log = client[machine_id].pull(log_name, block=True)
                     for line, out in mpf_log:
-                        run_logger.info('\n'.join([line] + out), extra={'function': async_fn, 'role': role})
+                        run_logger.info('\n'.join([line] + out), extra={'function': async_fn, 'role': async_role})
                     client[machine_id].execute(f"del {log_name}")
                 async_results = []
             if role in variables:
