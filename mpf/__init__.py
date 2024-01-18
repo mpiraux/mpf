@@ -321,7 +321,7 @@ def send(role: str, content: dict):
 
 def exec_func(role: str, interface: Optional[LinkInterface], function, experiment_values=None, delay=0, ex_ctx={}, parallel=False):
     machine_id = roles[role].machine_id
-    mpf_log_global_name = f'_{experiment_id}_{role}_{function.__name__}_log'
+    mpf_log_global_name = f'_{experiment_id}_{role.encode().hex()}_{function.__name__}_log'
     func_globals = {f.__name__: f for f in helpers}
     func_globals[mpf_log_global_name] = []
     client[machine_id].push(func_globals)
