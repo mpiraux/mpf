@@ -281,6 +281,7 @@ def run(role: Optional[str]=None, link: Optional[str]=None, delay: int=0, parall
     assert not (role and link) or (((itf := links[link].forward) or (itf := links[link].backward)) and itf.role == role), f"link {link} has no interface belonging to role {role}"
     assert not parallel or delay == 0, "delay can't be used with parallel"
     def inner(func):
+        assert 'mpf_ctx' in inspect.getfullargspec(func).args, "functions registered via @mpf.run must accept the 'mpf_ctx' argument"
         functions.append((role, link, delay, parallel, func))
         return func
     return inner
@@ -289,6 +290,7 @@ def init(role: str='main'):
     """ Registers the given function to be executed before the start of the experiment. """
     assert role in roles, f"role {role} is not defined in the cluster"
     def inner(func):
+        assert 'mpf_ctx' in inspect.getfullargspec(func).args, "functions registered via @mpf.init must accept the 'mpf_ctx' argument"
         init_functions.append((role, func))
         return func
     return inner
