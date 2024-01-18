@@ -14,7 +14,7 @@ import logging
 import math
 from tqdm.auto import tqdm
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from itertools import count
 from typing import Any, Dict, List, Optional, Tuple, Callable, Union
 from time import sleep
@@ -32,10 +32,11 @@ if not run_logger.hasHandlers():
 RESERVED_VARIABLES = {'mpf_ctx'}
 
 variables: Dict[str, 'Variable'] = {}
-functions: List[Tuple[str, int, Callable]] = []
+functions: List[Tuple[Optional[str], Optional[str], int, Callable]] = []
 init_functions: List[Tuple[str, Callable]] = []
 helpers: List[Callable] = []
 roles: Dict[str, 'Role'] = {}
+links: Dict[str, 'Link'] = {}
 experiment_globals: Dict[str, Any] = {}
 wsp_points: List[List[float]] = []
 engines: List[str] = []
@@ -119,6 +120,17 @@ class WSPVariable(Variable):
 
 
 @dataclass
+class LinkInterface():
+    """ An interface part of a link. """
+    name: str
+    ip: str
+    role: str  # The role owning this interface
+    link: Optional[str]  # The link composed of this interface
+    direction: str  # Either forward or backward
+    neighbour: Optional[str]  # The role connected to the other end of this interface, when it is known
+
+
+@dataclass
 class Role():
     """ A role defining what code to run, when to run it 
         and the network interfaces of the underlying machine
@@ -128,7 +140,21 @@ class Role():
     namespace: Optional[str]
     cpu_id: Optional[int]
     functions: List[Tuple[int, Any]]  # A list of tuple of delay value and IPython function to execute
-    interfaces: List[Tuple[str, str]]  # A list of tuple interface name, ip address
+    interfaces: List[LinkInterface]
+
+
+@dataclass
+class Link():
+    """ A network link composed of one or two interfaces belonging
+        to two roles. When the link is unidirectional, only the forward
+        interface is set.
+    """
+    name: str
+    forward: Optional[LinkInterface]
+    backward: Optional[LinkInterface]
+
+    def __iter__(self):
+        return iter([self.forward, self.backward] if self.backward else [self.forward])
 
 def create_profile(profile_dir: str, cluster: dict):
     """ Populates the given directory with a blank IPython profile structure, enables SSH 
@@ -214,6 +240,7 @@ del md
 def add_variable(name: str, values):
     """ Adds the given variable and values to explore in the experiment. """
     assert name not in variables, f"variable {name} already exists"
+    assert name not in roles and name not in links, f"{name} already exists among variables, roles and links"
     assert name not in RESERVED_VARIABLES, f"variable {name} is reserved"
     if type(values) is range:
         values = list(values)
@@ -225,6 +252,7 @@ def add_wsp_variable(name: str, values=None, range=None):
         To provide a range from which values will be sampled by WSP, use the range argument.
     """
     assert name not in variables, f"variable {name} already exists"
+    assert name not in roles and name not in links, f"{name} already exists among variables, roles and links"
     assert name not in RESERVED_VARIABLES, f"variable {name} is reserved"
     assert values is not None or range is not None, "One of values and range must be not None"
     variables[name] = WSPVariable(name, values=values or [], range=range or [])
@@ -233,11 +261,14 @@ def register_globals(**kwargs):
     """ Updates the experiment global variables with the given names and values. """
     experiment_globals.update(kwargs)
 
-def run(role: str='main', delay: int=0):
+def run(role: Optional[str]=None, link: Optional[str]=None, delay: int=0):
     """ Registers the given function to be executed by a role at given time as part of the experiment. """
-    assert role in roles, f"role {role} is not defined in the cluster"
+    assert role or link, "at least one of role or link must be set"
+    assert role is None or role in roles or role in variables, f"role {role} is not defined in the cluster"
+    assert link is None or link in links or link in variables, f"link {link} is not defined in the cluster"
+    assert not (role and link) or (((itf := links[link].forward) or (itf := links[link].backward)) and itf.role == role), f"link {link} has no interface belonging to role {role}"
     def inner(func):
-        functions.append((role, delay, func))
+        functions.append((role, link, delay, func))
         return func
     return inner
 
@@ -273,11 +304,13 @@ def send(role: str, content: dict):
     client[machine_id].push({'_files_to_dump': content}, block=True)
     client[machine_id].execute(_apply_send)
 
-def exec_func(role, function, experiment_values=None, delay=0, ex_ctx={}):
+def exec_func(role: str, interface: Optional[LinkInterface], function, experiment_values=None, delay=0, ex_ctx={}):
     machine_id = roles[role].machine_id
     client[machine_id].push(dict(mpf_log=[], **{f.__name__: f for f in helpers}))
     sleep(delay)
-    mpf_ctx = {'roles': {r: {'interfaces': roles[r].interfaces} for r in roles}, 'role': role}
+    mpf_ctx = {'roles': {r: {'interfaces': [asdict(itf) for itf in roles[r].interfaces]} for r in roles}, 'role': role}
+    if interface:
+        mpf_ctx['interface'] = asdict(interface)
     experiment_globals['mpf_ex_ctx'] = {'namespace': roles[role].namespace, 'cpu_id': roles[role].cpu_id, 'role': role, 'fun': function.__name__, **ex_ctx}
     function_args = inspect.getfullargspec(function).args
     call_args = {arg_name: experiment_values[arg_name] for arg_name in function_args if arg_name not in RESERVED_VARIABLES}
@@ -304,7 +337,7 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
         wsp_points.extend(ps.get_remaining())
         del ps
     for role, function in init_functions:
-        exec_func(role, function)
+        exec_func(role, None, function)
     results = []
     variable_values = []
     experiments = list(Variable.explore(list(variables.values()))) * n_runs
@@ -312,10 +345,19 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
     for experiment_values in tqdm(experiments):
         run_id = len(results)
         row = {}
-        for role, delay, function in functions:
-            result = exec_func(role, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id})
-            assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
-            row.update(result)
+        for role, link, delay, function in functions:
+            if role in variables:
+                role = experiment_values[role]
+                assert role in roles, f"Variable role gave value {role} which does not exist"
+            if link in variables:
+                link = experiment_values[link]
+                assert link in links, f"Variable link gave value {link} which does not exist"
+            for interface in links[link] if link else [None]:
+                if interface and not role:
+                    role = interface.role
+                result = exec_func(role, interface, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id}) # type: ignore
+                assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
+                row.update(result)
         results.append(row)
         variable_values.append(tuple(experiment_values.values()))
         client.abort()
@@ -333,8 +375,26 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
         machine_roles = [machine_spec] if 'role' in machine_spec else machine_spec['namespaces']
         for mr in machine_roles:
             assert mr['role'] not in roles, f"role {mr['role']} already exists"
+            assert mr['role'] not in variables and mr['role'] not in links, f"{mr['role']} already exists among variables, roles and links"
             assert 'namespace' in mr or 'namespaces' not in machine_spec, f"roles of machine {machine_spec['hostname']} must have a namespace set"
-            roles[mr['role']] = Role(name=mr['role'], machine_id=machine_id, functions=[], interfaces=mr['interfaces'], namespace=mr.get('namespace'), cpu_id=mr.get('cpu_id'))
+            interfaces = []
+            for itf in mr['interfaces']:
+                link_name = itf.get('link')
+                assert link_name is None or (link_name not in variables and link_name not in roles), f"{link_name} already exists among variables and roles"
+                direction = itf.get('direction', 'forward' if not link_name in links else 'backward')
+                interface = LinkInterface(name=itf['name'], ip=itf['ip'], role=mr['role'], link=link_name, direction=direction, neighbour=itf.get('neighbour'))
+                if link_name and link_name not in links:
+                    links[link_name] = Link(link_name, None, None)
+                if link := links.get(link_name):
+                    assert getattr(link, direction) is None, f"{itf}: A link interface already exists in this direction"
+                    setattr(link, direction, interface)
+                    if link.forward and link.backward:
+                        if link.forward.neighbour is None:  #type: ignore
+                            link.forward.neighbour = link.backward.role #type: ignore
+                        if link.backward.neighbour is None: #type: ignore
+                            link.backward.neighbour = link.forward.role #type: ignore
+                interfaces.append(interface)
+            roles[mr['role']] = Role(name=mr['role'], machine_id=machine_id, functions=[], interfaces=interfaces, namespace=mr.get('namespace'), cpu_id=mr.get('cpu_id'))
         engines.append(machine_spec['hostname'] if 'user' not in machine_spec else f"{machine_spec['user']}@{machine_spec['hostname']}")
 
     controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
