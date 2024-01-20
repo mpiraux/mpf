@@ -123,7 +123,7 @@ class WSPVariable(Variable):
 class LinkInterface():
     """ An interface part of a link. """
     name: str
-    ip: str
+    ip: Optional[str]
     role: str  # The role owning this interface
     link: Optional[str]  # The link composed of this interface
     direction: str  # Either forward or backward
@@ -353,9 +353,8 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
                 link = experiment_values[link]
                 assert link in links, f"Variable link gave value {link} which does not exist"
             for interface in links[link] if link else [None]:
-                if interface and not role:
-                    role = interface.role
-                result = exec_func(role, interface, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id}) # type: ignore
+                r = interface.role if interface and not role else role
+                result = exec_func(r, interface, function, experiment_values, delay, ex_ctx={'exp_id': experiment_id, 'run': run_id}) # type: ignore
                 assert all(k not in row for k in result.keys()), f"function {function} returned a result name that conflicts with experiment value"
                 row.update(result)
         results.append(row)
@@ -385,7 +384,7 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
                 link_name = itf.get('link')
                 assert link_name is None or (link_name not in variables and link_name not in roles), f"{link_name} already exists among variables and roles"
                 direction = itf.get('direction', 'forward' if not link_name in links else 'backward')
-                interface = LinkInterface(name=itf['name'], ip=itf['ip'], role=mr['role'], link=link_name, direction=direction, neighbour=itf.get('neighbour'))
+                interface = LinkInterface(name=itf['name'], ip=itf.get('ip'), role=mr['role'], link=link_name, direction=direction, neighbour=itf.get('neighbour'))
                 if link_name and link_name not in links:
                     links[link_name] = Link(link_name, None, None)
                 if link := links.get(link_name):
