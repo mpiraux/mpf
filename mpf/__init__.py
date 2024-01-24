@@ -348,7 +348,7 @@ def exec_func(role: str, interface: Optional[LinkInterface], function, experimen
     client[machine_id].execute(f"del {mpf_log_global_name}")
     return result
 
-def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
+def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=experiment_id, log_ex=False):
     """ Runs the experiment and returns the results gathered. """
     if log_ex:
         run_logger.setLevel(logging.INFO)
@@ -360,12 +360,21 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
         del ps
     for role, function in init_functions:
         exec_func(role, None, function)
+    experiments = list(Variable.explore(list(variables.values()))) * n_runs
+    assert experiments, "There must be at least one experiment run"
+    random.shuffle(experiments)
     results = []
     variable_values = []
-    experiments = list(Variable.explore(list(variables.values()))) * n_runs
-    random.shuffle(experiments)
-    for experiment_values in tqdm(experiments):
-        run_id = len(results)
+    variable_names = list(experiments[0].keys())
+    partial_df_idx = 0
+    for run_id, experiment_values in enumerate(tqdm(experiments)):
+        variable_values.append(tuple(experiment_values.values()))
+        if partial_df is not None and partial_df_idx < len(partial_df):
+            r = partial_df.iloc[partial_df_idx].to_dict()
+            if all(k in r and r[k] == v for k, v in experiment_values.items()):
+                partial_df_idx += 1
+                results.append({k: v for k, v in r.items() if k not in experiment_values})
+                continue
         row = {}
         async_results: List[Tuple[ipp.AsyncResult, Tuple[str, str, str]]] = []  # Stores pending parallel async results with associated role, function name and global mpf_log name
         for role, link, delay, parallel, function in functions:
@@ -399,11 +408,10 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
                     row.update(result)
         assert not async_results, "Some parallel functions were not joined when the experiment run completed"
         results.append(row)
-        variable_values.append(tuple(experiment_values.values()))
         client.abort()
         for e in engines:
             subprocess.run(['rsync', '-C', '-r', '--mkpath', '--remove-source-files', f"{e}:/dev/shm/mpf_experiments/{experiment_id}/run_{run_id:03}/", f"{experiment_dir}/run_{run_id:03}/"])
-    index = pd.MultiIndex.from_tuples(variable_values, names=[v.name for v in variables.values()])
+    index = pd.MultiIndex.from_tuples(variable_values, names=variable_names)
     return pd.DataFrame(results, index=index)
 
 def start_cluster_and_connect_client(cluster_file: FileIO):
