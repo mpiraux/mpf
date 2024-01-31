@@ -408,15 +408,19 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
     return cluster.connect_client_sync(sshserver=controller_node)
 
-if __name__ == "mpf":
+def setup(cluster_name, cluster):
+    global client
+    global experiment_dir
+    experiment_dir = os.path.join('mpf_experiments', experiment_id)
+    os.makedirs(experiment_dir)
+    shutil.copy(cluster_name ,experiment_dir)
+    shutil.copy(sys.argv[0], experiment_dir)
+
+    client = start_cluster_and_connect_client(cluster)
+    client.wait_for_engines(timeout=10, block=True)
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='mpf experiment')
     parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True, help='The YAML file describing the cluster')
     args = parser.parse_args()
-
-    experiment_dir = os.path.join('mpf_experiments', experiment_id)
-    os.makedirs(experiment_dir)
-    shutil.copy(args.cluster.name ,experiment_dir)
-    shutil.copy(sys.argv[0], experiment_dir)
-
-    client = start_cluster_and_connect_client(args.cluster)
-    client.wait_for_engines(timeout=10, block=True)
+    setup(args.cluster.name, args.cluster)
