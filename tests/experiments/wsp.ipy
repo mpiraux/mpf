@@ -1,6 +1,7 @@
 #!/usr/bin/env -S ipython --
 import mpf
 
+mpf.default_setup()
 mpf.add_wsp_variable('parallel', values=list(range(1, 9)))
 mpf.add_wsp_variable('zerocopy', values={'': 'disabled', '-Z': 'enabled'})
 mpf.add_wsp_variable('delay', range=[5, 40])

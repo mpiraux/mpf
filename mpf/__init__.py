@@ -31,6 +31,7 @@ if not run_logger.hasHandlers():
 
 RESERVED_VARIABLES = {'mpf_ctx'}
 
+setup_done: bool = False
 variables: Dict[str, 'Variable'] = {}
 functions: List[Tuple[Optional[str], Optional[str], int, Callable]] = []
 init_functions: List[Tuple[str, Callable]] = []
@@ -239,6 +240,7 @@ del md
 
 def add_variable(name: str, values):
     """ Adds the given variable and values to explore in the experiment. """
+    assert setup_done, f"mpf.setup must be called first"
     assert name not in variables, f"variable {name} already exists"
     assert name not in roles and name not in links, f"{name} already exists among variables, roles and links"
     assert name not in RESERVED_VARIABLES, f"variable {name} is reserved"
@@ -251,6 +253,7 @@ def add_wsp_variable(name: str, values=None, range=None):
         To provide a fixed set of values that will be explored, use the values argument.
         To provide a range from which values will be sampled by WSP, use the range argument.
     """
+    assert setup_done, f"mpf.setup must be called first"
     assert name not in variables, f"variable {name} already exists"
     assert name not in roles and name not in links, f"{name} already exists among variables, roles and links"
     assert name not in RESERVED_VARIABLES, f"variable {name} is reserved"
@@ -263,6 +266,7 @@ def register_globals(**kwargs):
 
 def run(role: Optional[str]=None, link: Optional[str]=None, delay: int=0):
     """ Registers the given function to be executed by a role at given time as part of the experiment. """
+    assert setup_done, f"mpf.setup must be called first"
     assert role or link, "at least one of role or link must be set"
     assert role is None or role in roles or role in variables, f"role {role} is not defined in the cluster"
     assert link is None or link in links or link in variables, f"link {link} is not defined in the cluster"
@@ -274,6 +278,7 @@ def run(role: Optional[str]=None, link: Optional[str]=None, delay: int=0):
 
 def init(role: str='main'):
     """ Registers the given function to be executed before the start of the experiment. """
+    assert setup_done, f"mpf.setup must be called first"
     assert role in roles, f"role {role} is not defined in the cluster"
     def inner(func):
         init_functions.append((role, func))
@@ -292,6 +297,7 @@ def send(role: str, content: dict):
         @param[in]  content: A dictionary whose keys are paths on the host and values the file
                              content to dump
     """
+    assert setup_done, f"mpf.setup must be called first"
     assert role in roles, f'role {role} not defined in roles'
     assert type(content) is dict, f'content must be a dict'
     machine_id = roles[role].machine_id
@@ -328,6 +334,7 @@ def exec_func(role: str, interface: Optional[LinkInterface], function, experimen
 
 def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
     """ Runs the experiment and returns the results gathered. """
+    assert setup_done, f"mpf.setup must be called first"
     if log_ex:
         run_logger.setLevel(logging.INFO)
     if wsp_target is not None:
@@ -366,7 +373,7 @@ def run_experiment(n_runs=3, wsp_target=None, log_ex=False):
     return pd.DataFrame(results, index=index)
 
 def start_cluster_and_connect_client(cluster_file: FileIO):
-    cluster_profile = f"profile_{os.path.basename(cluster_file.name)}"
+    cluster_profile = f"profile_{os.path.basename(cluster_file.name)}" # type: ignore
     cluster_definition = yaml.safe_load(cluster_file)
     for machine_id, machine_spec in enumerate(cluster_definition['machines']):
         assert 'namespaces' in machine_spec or 'role' in machine_spec, f"machine {machine_spec['hostname']} has no namespaces nor a role"
@@ -408,19 +415,19 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
     return cluster.connect_client_sync(sshserver=controller_node)
 
-def setup(cluster_name, cluster):
+def setup(cluster: FileIO):
     global client
     global experiment_dir
     experiment_dir = os.path.join('mpf_experiments', experiment_id)
     os.makedirs(experiment_dir)
-    shutil.copy(cluster_name ,experiment_dir)
+    shutil.copy(cluster.name, experiment_dir) # type: ignore
     shutil.copy(sys.argv[0], experiment_dir)
 
     client = start_cluster_and_connect_client(cluster)
     client.wait_for_engines(timeout=10, block=True)
 
-if __name__ == "__main__":
+def default_setup():
     parser = argparse.ArgumentParser(description='mpf experiment')
     parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True, help='The YAML file describing the cluster')
     args = parser.parse_args()
-    setup(args.cluster.name, args.cluster)
+    setup(args.cluster)

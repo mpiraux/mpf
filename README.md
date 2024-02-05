@@ -17,6 +17,7 @@ A mpf experiment consists of an IPython script. It defines several sections, spe
 #!/usr/bin/env -S ipython --
 import mpf
 
+mpf.default_setup()
 mpf.add_variable('parallel', range(1,9))
 mpf.add_variable('zerocopy', {'': 'disabled', '-Z': 'enabled'})
 
