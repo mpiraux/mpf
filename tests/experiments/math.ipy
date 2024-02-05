@@ -1,0 +1,16 @@
+#!/usr/bin/env -S ipython --
+import mpf
+import pandas as pd
+
+mpf.add_variable('a', values=range(1, 5))
+mpf.add_variable('b', values=range(2, 4))
+
+@mpf.run(role=next(iter(mpf.roles)))
+def math(mpf_ctx, a, b):
+    log_dir = %md run
+    result = a * b
+    %ex touch $log_dir/$result
+    return {'result': result}
+
+for df in mpf.run_experiment(n_runs=2, partial_df=pd.read_csv('math.csv'), experiment_id='math_exp_id', yield_partial_results=True, log_ex=True):
+    df.to_csv('math.csv')
