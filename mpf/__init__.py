@@ -425,6 +425,7 @@ def setup(cluster: FileIO):
 
     client = start_cluster_and_connect_client(cluster)
     client.wait_for_engines(timeout=10, block=True)
+    cluster.close()
 
 def default_setup():
     parser = argparse.ArgumentParser(description='mpf experiment')

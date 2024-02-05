@@ -1,7 +1,7 @@
 #!/usr/bin/env -S ipython --
 import mpf
 
-mpf.default_setup()
+mpf.default_setup()  # or mpf.setup(open("cluster.yaml"))
 mpf.add_variable('parallel', range(1,9))
 mpf.add_variable('zerocopy', {'': 'disabled', '-Z': 'enabled'})
 
