@@ -348,7 +348,7 @@ def exec_func(role: str, interface: Optional[LinkInterface], function, experimen
     client[machine_id].execute(f"del {mpf_log_global_name}")
     return result
 
-def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=experiment_id, log_ex=False) -> Iterator[pd.DataFrame]:
+def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=experiment_id, yield_partial_results=False, log_ex=False) -> pd.DataFrame | Iterator[pd.DataFrame]:
     """ Runs the experiment and returns the results gathered. """
     if log_ex:
         run_logger.setLevel(logging.INFO)
@@ -411,7 +411,10 @@ def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=exp
         client.abort()
         for e in engines:
             subprocess.run(['rsync', '-C', '-r', '--mkpath', '--remove-source-files', f"{e}:/dev/shm/mpf_experiments/{experiment_id}/run_{run_id:03}/", f"{experiment_dir}/run_{run_id:03}/"])
-        yield pd.DataFrame(results, index=pd.MultiIndex.from_tuples(variable_values, names=variable_names))
+        if yield_partial_results:
+            yield pd.DataFrame(results, index=pd.MultiIndex.from_tuples(variable_values, names=variable_names))
+    if not yield_partial_results:
+        pd.DataFrame(results, index=pd.MultiIndex.from_tuples(variable_values, names=variable_names))
 
 def start_cluster_and_connect_client(cluster_file: FileIO):
     cluster_profile = f"profile_{os.path.basename(cluster_file.name)}"
