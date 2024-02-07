@@ -2,6 +2,7 @@
 import mpf
 import pandas as pd
 
+mpf.default_setup()
 mpf.add_variable('a', values=range(1, 5))
 mpf.add_variable('b', values=range(2, 4))
 

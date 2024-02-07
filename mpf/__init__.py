@@ -467,8 +467,7 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
     return cluster.connect_client_sync(sshserver=controller_node)
 
 def setup(cluster: FileIO):
-    global client
-    global experiment_dir
+    global client, experiment_dir, setup_done
     experiment_dir = os.path.join('mpf_experiments', experiment_id)
     os.makedirs(experiment_dir)
     shutil.copy(cluster.name, experiment_dir) # type: ignore
@@ -477,6 +476,7 @@ def setup(cluster: FileIO):
     client = start_cluster_and_connect_client(cluster)
     client.wait_for_engines(timeout=10, block=True)
     cluster.close()
+    setup_done = True
 
 def default_setup():
     parser = argparse.ArgumentParser(description='mpf experiment')
