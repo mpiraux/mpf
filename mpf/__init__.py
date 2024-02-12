@@ -179,12 +179,13 @@ c.SSHEngineSetLauncher.engines = {engines}
 c.SSHEngineSetLauncher.remote_profile_dir = '/tmp/mpf-ipy-profile'
 c.Cluster.controller_launcher_class = 'ssh'
 c.SSHControllerLauncher.location = '{controller_node}'
-c.SSHControllerLauncher.controller_cmd = ['{python_path}', '-m', 'ipyparallel.controller', '--ip={controller_ip}']
+c.SSHControllerLauncher.controller_cmd = ['{python_path}', '-m', 'ipyparallel.controller', '--ip={controller_ip}', '--ports={controller_ports}']
 c.SSHLauncher.remote_python = '{python_path}'"""
-    .format(n=len(engines), engines=repr({e: 1 for e in engines}), controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path']))
+    .format(n=len(engines), engines=repr({e: 1 for e in engines}), controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path'],
+            controller_ports=controller_ports))
 
     with open(os.path.join(profile_dir, 'ipcontroller_config.py'), 'a') as config:
-        config.write("c.IPController.ports = {}".format(repr(controller_ports)))
+        config.write(f'c.IPController.ports = {repr(controller_ports)}')
 
     with open(os.path.join(profile_dir, 'startup', '00-mpf_magics.ipy'), 'w') as mpf_magics_file:
         mpf_magics_file.write("""
