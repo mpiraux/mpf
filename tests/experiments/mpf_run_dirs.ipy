@@ -11,4 +11,5 @@ for r in mpf.roles:
             f.write(mpf_ctx['role'])
         return {mpf_ctx['role']: out}
 
-print(mpf.run_experiment(n_runs=1, log_ex=False))
+for df in mpf.run_experiment(n_runs=1, log_ex=False):
+    print(df)

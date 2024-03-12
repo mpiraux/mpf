@@ -30,7 +30,7 @@ def start_client(mpf_ctx, parallel, zerocopy):
     result = %ex iperf3 -f k -t 2 -P $parallel $zerocopy -c {mpf_ctx['roles']['server']['interfaces'][0]['ip']} | tail -n 3 | grep -ioE "[0-9.]+ [kmg]bits"
     return {'goodput': result[0]}
 
-df = mpf.run_experiment()
+df = next(mpf.run_experiment())
 ```
 
 The script defines several parts constituting the experiment. First, it defines two variables that will be explored in the experiment. mpf combines the values of each variable to derive the experiment runs. Second, mpf allows defining functions that will be executed on particular nodes of the cluster. In our example, the function `start_server` will be executed on the machine bearing the `server` role. The `start_client` function will be executed following a one second delay after the previous function completed.

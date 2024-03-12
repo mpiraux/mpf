@@ -10,4 +10,4 @@ mpf.add_wsp_variable('delay', range=[5, 40])
 def skip(mpf_ctx, parallel, zerocopy, delay):
     return {}
 
-mpf.run_experiment(wsp_target=40)
+next(mpf.run_experiment(wsp_target=40))

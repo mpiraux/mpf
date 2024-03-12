@@ -355,8 +355,8 @@ def exec_func(role: str, interface: Optional[LinkInterface], function, experimen
     client[machine_id].execute(f"del {mpf_log_global_name}")
     return result
 
-def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=experiment_id, yield_partial_results=False, log_ex=False) -> pd.DataFrame | Iterator[pd.DataFrame]:
-    """ Runs the experiment and returns the results gathered. """
+def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=experiment_id, yield_partial_results=False, log_ex=False) -> Iterator[pd.DataFrame]:
+    """ Runs the experiment and yields the results gathered. """
     assert setup_done, f"mpf.setup must be called first"
     if log_ex:
         run_logger.setLevel(logging.INFO)
@@ -422,7 +422,7 @@ def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=exp
         if yield_partial_results:
             yield pd.DataFrame(results, index=pd.MultiIndex.from_tuples(variable_values, names=variable_names))
     if not yield_partial_results:
-        pd.DataFrame(results, index=pd.MultiIndex.from_tuples(variable_values, names=variable_names))
+        yield pd.DataFrame(results, index=pd.MultiIndex.from_tuples(variable_values, names=variable_names))
 
 def start_cluster_and_connect_client(cluster_file: FileIO):
     cluster_profile = f"profile_{os.path.basename(cluster_file.name)}" # type: ignore
