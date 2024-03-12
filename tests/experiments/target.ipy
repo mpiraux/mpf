@@ -1,0 +1,15 @@
+#!/usr/bin/env -S ipython --
+MPF_SETUP = 1
+import mpf
+
+mpf.default_setup()
+mpf.add_variable('node', values=["client", "server"])
+
+
+@mpf.run(role='node')
+def interface(mpf_ctx):
+    out = %ex ip a | grep "inet "
+    return {mpf_ctx['role']: '\n'.join(out)}
+
+for df in mpf.run_experiment(n_runs=1, log_ex=False):
+    print(df)
