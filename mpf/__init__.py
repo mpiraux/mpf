@@ -41,6 +41,8 @@ links: Dict[str, 'Link'] = {}
 experiment_globals: Dict[str, Any] = {}
 wsp_points: List[List[float]] = []
 engines: List[str] = []
+engines_launcher: str = ''
+controller_launcher: str = ''
 
 experiment_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
 random.seed('mpf')
@@ -158,43 +160,57 @@ class Link():
         return iter([self.forward, self.backward] if self.backward else [self.forward])
 
 def create_profile(profile_dir: str, cluster: dict):
-    """ Populates the given directory with a blank IPython profile structure, enables SSH 
+    """ Populates the given directory with a blank IPython profile structure, starts a controller 
         and sets up the IPython engines based on the given YAML cluster file.
-        Creates the roles available from the cluster definition.
     """
-    # The controller is the ipyparallel controller listening for external connections
-    controller_node = f"{cluster['controller']['user']}@{cluster['controller']['hostname']}"
-    controller_ip = cluster['controller']['control_ip']
-    controller_ports = cluster['controller']['ports']
-
     shutil.rmtree(profile_dir, ignore_errors=True)
     p = subprocess.run(['ipython', 'profile', 'create', '--parallel', f'--profile-dir={profile_dir}'])
     assert p.returncode == 0
 
-    with open(os.path.join(profile_dir, 'ipcluster_config.py'), 'a') as config:
-        config.write("""
-c.Cluster.n = {n}
-c.Cluster.engine_launcher_class = 'ssh'
-c.SSHEngineSetLauncher.engines = {engines}
-c.SSHEngineSetLauncher.remote_profile_dir = '/tmp/mpf-ipy-profile'
+    # The controller is the ipyparallel controller listening for external connections
+    controller_ports = cluster['controller']['ports']
+
+    ipcluster_config = ""
+
+    if controller_launcher == 'ssh':
+        controller_node = f"{cluster['controller']['user']}@{cluster['controller']['hostname']}"
+        controller_ip = cluster['controller']['control_ip']
+        ipcluster_config += """
 c.Cluster.controller_launcher_class = 'ssh'
 c.SSHControllerLauncher.location = '{controller_node}'
 c.SSHControllerLauncher.controller_cmd = ['{python_path}', '-m', 'ipyparallel.controller', '--ip={controller_ip}', '--ports={controller_ports}']
-c.SSHLauncher.remote_python = '{python_path}'"""
-    .format(n=len(engines), engines=repr({e: 1 for e in engines}), controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path'],
-            controller_ports=controller_ports))
+c.SSHLauncher.remote_python = '{python_path}'
+""".format(controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path'],
+            controller_ports=controller_ports)
 
-    with open(os.path.join(profile_dir, 'ipcontroller_config.py'), 'a') as config:
-        config.write(f'c.IPController.ports = {repr(controller_ports)}')
+    elif controller_launcher == 'local':
+        ipcluster_config += "c.Cluster.controller_launcher_class = 'local'\n"
+
+    ipcluster_config += "c.Cluster.n = {n}\n".format(n=len(engines))
+    if engines_launcher == 'ssh':
+        ipcluster_config += """
+c.Cluster.engine_launcher_class = 'ssh'
+c.SSHEngineSetLauncher.engines = {engines}
+c.SSHEngineSetLauncher.remote_profile_dir = '/tmp/mpf-ipy-profile'
+""".format(engines=repr({e: 1 for e in engines}))
+
+    elif engines_launcher == 'local':
+        ipcluster_config += "c.Cluster.engine_launcher_class = 'local'\n"
+
+    with open(os.path.join(profile_dir, 'ipcluster_config.py'), 'a') as config:
+        config.write(ipcluster_config)
+
+    if controller_launcher == 'ssh':
+        with open(os.path.join(profile_dir, 'ipcontroller_config.py'), 'a') as config:
+            config.write(f'c.IPController.ports = {repr(controller_ports)}')
 
     magics_profile_filename = os.path.join(profile_dir, 'startup', '00-mpf_magics.ipy')
     shutil.copy(os.path.join(os.path.dirname(__file__), '00-mpf_magics.ipy'), magics_profile_filename)
 
-    for e in engines:
-        p = subprocess.run(['rsync', '--mkpath', magics_profile_filename, f'{e}:/tmp/mpf-ipy-profile/startup/00-mpf_magics.ipy'])
-        assert p.returncode == 0
-
-    return controller_node
+    if engines_launcher == 'ssh':
+        for e in engines:
+            p = subprocess.run(['rsync', '--mkpath', magics_profile_filename, f'{e}:/tmp/mpf-ipy-profile/startup/00-mpf_magics.ipy'])
+            assert p.returncode == 0
 
 def add_variable(name: str, values):
     """ Adds the given variable and values to explore in the experiment. """
@@ -363,7 +379,12 @@ def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=exp
         results.append(row)
         client.abort()
         for e in engines:
-            subprocess.run(['rsync', '-C', '-r', '--mkpath', '--remove-source-files', f"{e}:/dev/shm/mpf_experiments/{experiment_id}/run_{run_id:03}/", f"{experiment_dir}/run_{run_id:03}/"])
+            local_path = f"/dev/shm/mpf_experiments/{experiment_id}/run_{run_id:03}/"
+            if engines_launcher == 'ssh':
+                subprocess.run(['rsync', '-C', '-r', '--mkpath', '--remove-source-files', f"{e}:{local_path}", f"{experiment_dir}/run_{run_id:03}/"])
+            elif engines_launcher == 'local':
+                if os.path.exists(local_path):
+                    shutil.move(local_path, f"{experiment_dir}/")
         if yield_partial_results:
             yield pd.DataFrame(results, index=pd.MultiIndex.from_tuples(variable_values, names=variable_names))
     if not yield_partial_results:
@@ -372,6 +393,9 @@ def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=exp
 def start_cluster_and_connect_client(cluster_file: FileIO):
     cluster_profile = f"profile_{os.path.basename(cluster_file.name)}" # type: ignore
     cluster_definition = yaml.safe_load(cluster_file)
+    global controller_launcher, engines_launcher
+    controller_launcher = 'ssh' if cluster_definition['controller']['hostname'] != 'localhost' else 'local'
+    engines_launcher = 'ssh' if any(m['hostname'] != 'localhost' for m in cluster_definition['machines']) else 'local'
     for machine_id, machine_spec in enumerate(cluster_definition['machines']):
         assert 'namespaces' in machine_spec or 'role' in machine_spec, f"machine {machine_spec['hostname']} has no namespaces nor a role"
         machine_roles = []
@@ -403,14 +427,17 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
             roles[mr['role']] = Role(name=mr['role'], machine_id=machine_id, functions=[], interfaces=interfaces, namespace=mr.get('namespace'), cpu_id=mr.get('cpu_id'))
         engines.append(machine_spec['hostname'] if 'user' not in machine_spec else f"{machine_spec['user']}@{machine_spec['hostname']}")
 
-    controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
+    connect_args = {}
+    if controller_launcher == 'ssh':
+        controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
+        connect_args['sshserver'] = controller_node
     try:
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
     except FileNotFoundError:
         create_profile(cluster_profile, cluster_definition)
         subprocess.run(['ipcluster', 'start', f'--profile-dir={cluster_profile}', '--daemonize=True', '--log-level=ERROR'])
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
-    return cluster.connect_client_sync(sshserver=controller_node)
+    return cluster.connect_client_sync(**connect_args)
 
 def setup(cluster: FileIO):
     global client, experiment_dir, setup_done

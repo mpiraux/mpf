@@ -1,6 +1,7 @@
 #!/usr/bin/env -S ipython --
 import mpf
 
+mpf.default_setup()
 mpf.add_variable('var', values=[0])
 
 for r in mpf.roles:
