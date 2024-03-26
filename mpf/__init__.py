@@ -187,66 +187,11 @@ c.SSHLauncher.remote_python = '{python_path}'"""
     with open(os.path.join(profile_dir, 'ipcontroller_config.py'), 'a') as config:
         config.write(f'c.IPController.ports = {repr(controller_ports)}')
 
-    with open(os.path.join(profile_dir, 'startup', '00-mpf_magics.ipy'), 'w') as mpf_magics_file:
-        mpf_magics_file.write("""
-from IPython.core.magic import register_line_magic
-import inspect
-def get_mpf_ctx():
-    frame = inspect.currentframe()
-    while 'mpf_ctx' not in frame.f_locals:
-        up_frame = frame.f_back
-        del frame
-        frame = up_frame
-    v = frame.f_locals['mpf_ctx']
-    del frame
-    return v
-
-import shlex
-def ex(args):
-    mpf_ctx = get_mpf_ctx()
-    mpf_ex_ctx = mpf_ctx['mpf_ex_ctx']
-    mpf_log = globals()[mpf_ctx['mpf_log']]
-    args = args.split()
-    env_variables = []
-    for i, a in enumerate(args):
-        if '=' in a:
-            env_variables.append(a)
-        else:
-            args = args[i:]
-            break
-    if mpf_ex_ctx.get('cpu_id') is not None:
-        args = ['taskset', '-c', str(mpf_ex_ctx['cpu_id'])] + args
-    if mpf_ex_ctx.get('namespace') is not None:
-        args = ['ip', 'netns', 'exec', mpf_ex_ctx['namespace']] + args
-    line = ' '.join(env_variables + args)
-    if any(s == '&' for s in shlex.shlex(line)):
-        out = []
-        !$line
-    else:
-        out = !$line
-    mpf_log.append((line, out))
-    return out
-register_line_magic(ex)
-del ex
-
-import os
-def md(scope):
-    mpf_ctx = get_mpf_ctx()
-    assert scope in ['exp', 'run', 'role', 'fun'], "Scope for mpf run files directories must be one of ['exp', 'run', 'role', 'fun']"
-    mpf_ex_ctx = mpf_ctx['mpf_ex_ctx']
-    mpf_dir = f"/dev/shm/mpf_experiments/{{mpf_ex_ctx['exp_id']}}/run_{{mpf_ex_ctx['run']:03}}/{{mpf_ex_ctx['role']}}/{{mpf_ex_ctx['fun']}}"
-    for s in ['fun', 'role', 'run', 'exp']:
-        if scope == s:
-            break
-        mpf_dir = os.path.dirname(mpf_dir)
-    os.makedirs(mpf_dir, exist_ok=True)
-    return mpf_dir
-register_line_magic(md)
-del md
-        """.format(python_path=cluster['global']['python_path']))
+    magics_profile_filename = os.path.join(profile_dir, 'startup', '00-mpf_magics.ipy')
+    shutil.copy(os.path.join(os.path.dirname(__file__), '00-mpf_magics.ipy'), magics_profile_filename)
 
     for e in engines:
-        p = subprocess.run(['rsync', '--mkpath', os.path.join(profile_dir, 'startup', '00-mpf_magics.ipy'), f'{e}:/tmp/mpf-ipy-profile/startup/00-mpf_magics.ipy'])
+        p = subprocess.run(['rsync', '--mkpath', magics_profile_filename, f'{e}:/tmp/mpf-ipy-profile/startup/00-mpf_magics.ipy'])
         assert p.returncode == 0
 
     return controller_node
