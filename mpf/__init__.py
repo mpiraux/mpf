@@ -312,7 +312,7 @@ def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=exp
         wsp_points.extend(ps.get_remaining())
         del ps
     for role, function in init_functions:
-        exec_func(role, None, function)
+        exec_func(role, None, function, ex_ctx={'exp_id': experiment_id, 'run': 'init'})
     experiments = list(Variable.explore(list(variables.values()))) * n_runs
     assert experiments, "There must be at least one experiment run"
     random.shuffle(experiments)
