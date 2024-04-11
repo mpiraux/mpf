@@ -424,8 +424,12 @@ def setup(cluster: FileIO):
     cluster.close()
     setup_done = True
 
-def default_setup():
+def default_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description='mpf experiment')
     parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True, help='The YAML file describing the cluster')
+    return parser
+
+def default_setup():
+    parser = default_arg_parser()
     args = parser.parse_args()
     setup(args.cluster)
