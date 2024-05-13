@@ -44,6 +44,8 @@ engines: List[str] = []
 engines_launcher: str = ''
 controller_launcher: str = ''
 
+wsp_output_file: Optional[FileIO] = None
+
 experiment_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
 random.seed('mpf')
 
@@ -321,12 +323,17 @@ def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=exp
     assert setup_done, f"mpf.setup must be called first"
     if log_ex:
         run_logger.setLevel(logging.INFO)
-    if wsp_target is not None:
+    if wsp_target is not None and not wsp_points:
         wsp_dimensions = sum([type(v) is WSPVariable for v in variables.values()])
         ps = wsp.PointSet.from_random(wsp_target * 10 * wsp_dimensions, wsp_dimensions, 'mpf')
         ps.adaptive_wsp(wsp_target)
         wsp_points.extend(ps.get_remaining())
         del ps
+        if wsp_output_file:
+            wsp_output_file.write('\n'.join([repr(list(p))[1:-1] for p in wsp_points]))
+            wsp_output_file.close()
+            yield pd.DataFrame([])
+            return
     for role, function in init_functions:
         exec_func(role, None, function, ex_ctx={'exp_id': experiment_id, 'run': 'init'})
     experiments = list(Variable.explore(list(variables.values()))) * n_runs
@@ -390,12 +397,7 @@ def run_experiment(n_runs=3, wsp_target=None, partial_df=None, experiment_id=exp
     if not yield_partial_results:
         yield pd.DataFrame(results, index=pd.MultiIndex.from_tuples(variable_values, names=variable_names))
 
-def start_cluster_and_connect_client(cluster_file: FileIO):
-    cluster_profile = f"profile_{os.path.basename(cluster_file.name)}" # type: ignore
-    cluster_definition = yaml.safe_load(cluster_file)
-    global controller_launcher, engines_launcher
-    controller_launcher = 'ssh' if cluster_definition['controller']['hostname'] != 'localhost' else 'local'
-    engines_launcher = 'ssh' if any(m['hostname'] != 'localhost' for m in cluster_definition['machines']) else 'local'
+def load_cluster(cluster_definition):
     for machine_id, machine_spec in enumerate(cluster_definition['machines']):
         assert 'namespaces' in machine_spec or 'role' in machine_spec, f"machine {machine_spec['hostname']} has no namespaces nor a role"
         machine_roles = []
@@ -427,6 +429,11 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
             roles[mr['role']] = Role(name=mr['role'], machine_id=machine_id, functions=[], interfaces=interfaces, namespace=mr.get('namespace'), cpu_id=mr.get('cpu_id'))
         engines.append(machine_spec['hostname'] if 'user' not in machine_spec else f"{machine_spec['user']}@{machine_spec['hostname']}")
 
+def start_cluster_and_connect_client(cluster_filename: str, cluster_definition):
+    cluster_profile = f"profile_{os.path.basename(cluster_filename)}"
+    global controller_launcher, engines_launcher
+    controller_launcher = 'ssh' if cluster_definition['controller']['hostname'] != 'localhost' else 'local'
+    engines_launcher = 'ssh' if any(m['hostname'] != 'localhost' for m in cluster_definition['machines']) else 'local'
     connect_args = {}
     if controller_launcher == 'ssh':
         controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
@@ -439,24 +446,36 @@ def start_cluster_and_connect_client(cluster_file: FileIO):
         cluster = ipp.Cluster.from_file(profile_dir=cluster_profile)
     return cluster.connect_client_sync(**connect_args)
 
-def setup(cluster: FileIO):
-    global client, experiment_dir, setup_done
-    experiment_dir = os.path.join('mpf_experiments', experiment_id)
-    os.makedirs(experiment_dir)
-    shutil.copy(cluster.name, experiment_dir) # type: ignore
-    shutil.copy(sys.argv[0], experiment_dir)
+def setup(cluster: FileIO, wsp_input: Optional[FileIO] = None, wsp_output: Optional[FileIO] = None):
+    global client, experiment_dir, setup_done, wsp_output_file
+    wsp_output_file = wsp_output
+    cluster_definition = yaml.safe_load(cluster)
+    load_cluster(cluster_definition)
+    if wsp_input:
+        for l in wsp_input:
+            wsp_points.append([float(f) for f in l.strip().split(',')])
+        wsp_input.close()
+    if not wsp_output:
+        experiment_dir = os.path.join('mpf_experiments', experiment_id)
+        os.makedirs(experiment_dir)
+        shutil.copy(cluster.name, experiment_dir)
+        shutil.copy(sys.argv[0], experiment_dir)
 
-    client = start_cluster_and_connect_client(cluster)
-    client.wait_for_engines(timeout=10, block=True)
-    cluster.close()
+        client = start_cluster_and_connect_client(cluster.name, cluster_definition)
+        client.wait_for_engines(timeout=10, block=True)
+        cluster.close()
     setup_done = True
 
 def default_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description='mpf experiment')
     parser.add_argument('-c', '--cluster', metavar='cluster.yaml', type=argparse.FileType('r'), required=True, help='The YAML file describing the cluster')
+    parser.add_argument('--wsp-output', metavar='wsp.csv', type=argparse.FileType('w'), help='Do not run the experiment but output the points generated by WSP.')
+    parser.add_argument('--wsp-input', metavar='wsp.csv', type=argparse.FileType('r'), help='Use previously generated WSP points instead of computing them.')
     return parser
 
 def default_setup():
     parser = default_arg_parser()
     args = parser.parse_args()
-    setup(args.cluster)
+    if args.wsp_output and args.wsp_input:
+        parser.error("--wsp-output and --wsp-input can not be used together")
+    setup(args.cluster, wsp_output=args.wsp_output, wsp_input=args.wsp_input)
