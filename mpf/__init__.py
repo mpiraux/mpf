@@ -431,7 +431,6 @@ def load_cluster(cluster_definition):
 
 def start_cluster_and_connect_client(cluster_filename: str, cluster_definition):
     cluster_profile = f"profile_{os.path.basename(cluster_filename)}"
-    controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
     global controller_launcher, engines_launcher
     controller_launcher = 'ssh' if cluster_definition['controller']['hostname'] != 'localhost' else 'local'
     engines_launcher = 'ssh' if any(m['hostname'] != 'localhost' for m in cluster_definition['machines']) else 'local'
