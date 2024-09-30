@@ -1,0 +1,17 @@
+
+global:
+  python_path: /path/to/python
+machines:
+  - &controller_def
+    hostname: localhost
+    user: user
+    role: local
+    interfaces:
+      - name: lo
+        ip: 127.0.0.1
+        link: loopback
+        direction: forward
+controller:
+  <<: *controller_def
+  ports: '65400-65432'
+  control_ip: 127.0.0.1
