@@ -22,7 +22,7 @@ mpf.add_variable('parallel', range(1,9))
 mpf.add_variable('zerocopy', {'': 'disabled', '-Z': 'enabled'})
 
 @mpf.run(role='server')
-def start_server():
+def start_server(mpf_ctx):
     %ex iperf3 -D -s -1 > /dev/null
 
 @mpf.run(role='client', delay=1)

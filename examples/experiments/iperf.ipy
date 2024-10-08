@@ -6,7 +6,7 @@ mpf.add_variable('parallel', range(1,9))
 mpf.add_variable('zerocopy', {'': 'disabled', '-Z': 'enabled'})
 
 @mpf.run(role='server')
-def start_server():
+def start_server(mpf_ctx):
     %ex iperf3 -D -s -1 > /dev/null
 
 @mpf.run(role='client', delay=1)
@@ -14,4 +14,4 @@ def start_client(mpf_ctx, parallel, zerocopy):
     result = %ex iperf3 -f k -t 2 -P $parallel $zerocopy -c {mpf_ctx['roles']['server']['interfaces'][0]['ip']} | tail -n 3 | grep -ioE "[0-9.]+ [kmg]bits"
     return {'goodput': result[0]}
 
-next(mpf.run_experiment())
+print(next(mpf.run_experiment()))
