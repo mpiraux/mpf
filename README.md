@@ -1,6 +1,6 @@
 # mpf: Minimal Performance Framework
 
-mpf is a tool to write evaluation experiments, exploring variables of interest to understand the performance of computer systems. mpf can compile code, deploy software to a given computer cluster and orchestrate the evaluation to collect data for which graphs can be generated.
+mpf is a tool to write evaluation experiments, exploring variables of interest to understand the performance of computer systems. mpf can ~~compile code, deploy software to a given computer cluster and~~ orchestrate the evaluation to collect data for which graphs can be generated.
 
 ## Features
 
