@@ -170,20 +170,19 @@ def create_profile(profile_dir: str, cluster: dict):
     assert p.returncode == 0
 
     # The controller is the ipyparallel controller listening for external connections
+    controller_ip = cluster['controller']['control_ip']
     controller_ports = cluster['controller']['ports']
 
-    ipcluster_config = ""
+    ipcluster_config = """c.ControllerLauncher.controller_cmd = ['{python_path}', '-m', 'ipyparallel.controller', '--ip={controller_ip}', '--ports={controller_ports}']
+""".format(controller_ip=controller_ip, python_path=cluster['global']['python_path'],
+            controller_ports=controller_ports)
 
     if controller_launcher == 'ssh':
         controller_node = f"{cluster['controller']['user']}@{cluster['controller']['hostname']}"
-        controller_ip = cluster['controller']['control_ip']
         ipcluster_config += """
 c.Cluster.controller_launcher_class = 'ssh'
 c.SSHControllerLauncher.location = '{controller_node}'
-c.SSHControllerLauncher.controller_cmd = ['{python_path}', '-m', 'ipyparallel.controller', '--ip={controller_ip}', '--ports={controller_ports}']
-c.SSHLauncher.remote_python = '{python_path}'
-""".format(controller_node=controller_node, controller_ip=controller_ip, python_path=cluster['global']['python_path'],
-            controller_ports=controller_ports)
+""".format(controller_node=controller_node)
 
     elif controller_launcher == 'local':
         ipcluster_config += "c.Cluster.controller_launcher_class = 'local'\n"
@@ -194,7 +193,8 @@ c.SSHLauncher.remote_python = '{python_path}'
 c.Cluster.engine_launcher_class = 'ssh'
 c.SSHEngineSetLauncher.engines = {engines}
 c.SSHEngineSetLauncher.remote_profile_dir = '/tmp/mpf-ipy-profile'
-""".format(engines=repr({e: 1 for e in engines}))
+c.SSHLauncher.remote_python = '{python_path}'
+""".format(engines=repr({e: 1 for e in engines}), python_path=cluster['global']['python_path'])
 
     elif engines_launcher == 'local':
         ipcluster_config += "c.Cluster.engine_launcher_class = 'local'\n"
@@ -433,7 +433,9 @@ def start_cluster_and_connect_client(cluster_filename: str, cluster_definition):
     cluster_profile = f"profile_{os.path.basename(cluster_filename)}"
     global controller_launcher, engines_launcher
     controller_launcher = 'ssh' if cluster_definition['controller']['hostname'] != 'localhost' else 'local'
-    engines_launcher = 'ssh' if any(m['hostname'] != 'localhost' for m in cluster_definition['machines']) else 'local'
+    engines_classes = list(map(lambda m: 'ssh' if m['hostname'] != 'localhost' else 'local', cluster_definition['machines']))
+    assert not (any(c == 'ssh' for c in engines_classes) and any(c == 'local' for c in engines_classes)), "Cannot mix local and remote engines"
+    engines_launcher = 'ssh' if any(c == 'ssh' for c in engines_classes) else 'local'
     connect_args = {}
     if controller_launcher == 'ssh':
         controller_node = f"{cluster_definition['controller']['user']}@{cluster_definition['controller']['hostname']}"
