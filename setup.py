@@ -17,4 +17,5 @@ setup(
         'scipy >= 1.11',
         'tqdm'
         ],
+    include_package_data=True,
 )
