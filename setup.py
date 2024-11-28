@@ -17,5 +17,6 @@ setup(
         'scipy >= 1.11',
         'tqdm'
         ],
+    scripts=['mpf-cluster'],
     include_package_data=True,
 )

@@ -30,6 +30,7 @@ if not run_logger.hasHandlers():
     run_logger.addHandler(sh)
 
 RESERVED_VARIABLES = {'mpf_ctx'}
+REMOTE_PROFILE_DIR = '/tmp/mpf-ipy-profile'
 
 setup_done: bool = False
 variables: Dict[str, 'Variable'] = {}
@@ -192,9 +193,9 @@ c.SSHControllerLauncher.location = '{controller_node}'
         ipcluster_config += """
 c.Cluster.engine_launcher_class = 'ssh'
 c.SSHEngineSetLauncher.engines = {engines}
-c.SSHEngineSetLauncher.remote_profile_dir = '/tmp/mpf-ipy-profile'
+c.SSHEngineSetLauncher.remote_profile_dir = '{remote_profile_dir}'
 c.SSHLauncher.remote_python = '{python_path}'
-""".format(engines=repr({e: 1 for e in engines}), python_path=cluster['global']['python_path'])
+""".format(engines=repr({e: 1 for e in engines}), python_path=cluster['global']['python_path'], remote_profile_dir=REMOTE_PROFILE_DIR)
 
     elif engines_launcher == 'local':
         ipcluster_config += "c.Cluster.engine_launcher_class = 'local'\n"
@@ -211,7 +212,7 @@ c.SSHLauncher.remote_python = '{python_path}'
 
     if engines_launcher == 'ssh':
         for e in engines:
-            p = subprocess.run(['rsync', '--mkpath', magics_profile_filename, f'{e}:/tmp/mpf-ipy-profile/startup/00-mpf_magics.ipy'])
+            p = subprocess.run(['rsync', '--mkpath', magics_profile_filename, f'{e}:{REMOTE_PROFILE_DIR}/startup/00-mpf_magics.ipy'])
             assert p.returncode == 0
 
 def add_variable(name: str, values):
